@@ -34,6 +34,10 @@ npm run dev
 
 ## Deploy to Cloudflare Pages
 
+Production URL:
+
+- https://food-tracker-7qq.pages.dev
+
 The production deploy flow follows the `consistency-tracker` pattern:
 
 - GitHub Action `.github/workflows/deploy.yml` deploys to Cloudflare Pages on pushes to `main`.
@@ -45,6 +49,9 @@ Required repository secrets for GitHub Actions:
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 - `CF_API_KEY` (Cloudflare API token for `wrangler`, mapped to `CLOUDFLARE_API_TOKEN` in the workflow)
+
+Note: URLs that include a deployment hash (for example `https://<deployment-id>.food-tracker-7qq.pages.dev`) are immutable snapshots.
+If signup/login fails on one of those URLs, open the main project URL above for the latest build.
 
 Local one-off deploy still works with:
 
