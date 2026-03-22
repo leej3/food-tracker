@@ -62,6 +62,44 @@ npm run build
 npm run deploy:cloudflare
 ```
 
+## Production DB bootstrap (critical after initial deploy)
+
+Current production URL:
+
+- https://food-tracker-7qq.pages.dev
+
+The app ships with full food-tracker migrations, but the hosted Supabase project currently needs schema application once per new project or first deployment.
+
+If you see 404 console errors for any of:
+
+- `nutrient_definitions`
+- `user_roles`
+- `family_members`
+
+run migration SQL in that project's Supabase SQL Editor (or with a direct SQL runner that has service-role privileges).
+
+Suggested order:
+
+1. Open Supabase → SQL Editor.
+2. Run the SQL from:
+   - `supabase/migrations/0001_init.sql`
+   - `supabase/migrations/0002_user_directory.sql`
+   - `supabase/migrations/0004_auto_self_access_and_inference_events.sql`
+   - `supabase/migrations/0005_update_food_entry_with_values.sql`
+3. Re-run the app at `https://food-tracker-7qq.pages.dev` and refresh.
+
+Quick verification (expected 200, JSON array response, not 404):
+
+```bash
+SUPABASE_URL=https://gkfqwrfunkrpxynslwfn.supabase.co
+SUPABASE_ANON_KEY=...
+curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/nutrient_definitions?select=*"
+curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/user_roles?select=*"
+curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/family_members?select=*"
+```
+
+If these requests return `PGRST205` errors, the database schema still does not include the food-tracker tables.
+
 ## Environment variables
 
 - Front-end:

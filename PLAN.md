@@ -128,6 +128,7 @@ The first release intentionally favors simplicity and a single deployed app:
 ## 6) Deployment/validation checklist
 
 - Run migrations in order.
+- Confirm production PostgREST schema contains food-tracker tables (`nutrient_definitions`, `user_roles`, `family_members`, ... ) before marking deployment as complete.
 - Seed bucket and any admin users for local development.
 - Ensure `food-analyze` has environment variables in Supabase secrets.
 - Confirm app runs:
@@ -158,6 +159,25 @@ The first release intentionally favors simplicity and a single deployed app:
     - `VITE_SUPABASE_ANON_KEY`.
   - `CF_API_KEY` is used in CI (`CLOUDFLARE_API_TOKEN`).
 
+## 8) Production schema remediation (current blocker)
+
+- The production error set:
+  - `Could not find the table 'public.nutrient_definitions'`
+  - `Could not find the table 'public.user_roles'`
+  - `Could not find the table 'public.family_members'`
+  means the Pages deployment is pointed at an existing Supabase project that has only the consistency-tracker schema (`people`, `consistency_entries`).
+- `food-tracker-7qq.pages.dev` is otherwise healthy; this is a backend schema mismatch.
+- Apply these migration files on the same Supabase project before using the app:
+  - `supabase/migrations/0001_init.sql`
+  - `supabase/migrations/0002_user_directory.sql`
+  - `supabase/migrations/0004_auto_self_access_and_inference_events.sql`
+  - `supabase/migrations/0005_update_food_entry_with_values.sql`
+- After applying, verify with production anon key:
+  - `curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/nutrient_definitions?select=*"`
+  - `curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/user_roles?select=*"`
+  - `curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/family_members?select=*"`
+- Expected output should be JSON array(s); `[]` is acceptable for new installs. 404 indicates schema is not loaded.
+
 ## 7) Progress log
 
 - 2026-03-22: Migrated implementation to `/Users/johnlee/code/website-management/sites/food-tracker` and then corrected to `/Users/johnlee/code/websites-management/sites/food-tracker` (parent repo alignment).
@@ -179,3 +199,4 @@ The first release intentionally favors simplicity and a single deployed app:
   - Production URL: `https://food-tracker-7qq.pages.dev`.
   - Latest successful deployment after prod secret refresh: `https://bbd626aa.food-tracker-7qq.pages.dev` (commit `2fad783`).
 - 2026-03-22: Production login failure was traced to local-only Supabase env values in build-time secrets; corrected to hosted values used by consistency-tracker.
+- 2026-03-22: Production app logs now show 404s for `nutrient_definitions`, `user_roles`, `family_members`; this indicates missing migration application on the shared Supabase backend and is blocked until migration SQL is applied.

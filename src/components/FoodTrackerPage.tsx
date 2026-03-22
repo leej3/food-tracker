@@ -103,6 +103,22 @@ const getNutrientAmount = (entry: FoodEntryWithNutrients, code: NutrientCode): n
   return row ? row.amount : 0;
 };
 
+const getBackendSchemaError = (error: unknown): string | null => {
+  const typed = error as { code?: string; message?: string; details?: string } | null;
+  if (!typed || typed.code !== "PGRST205") {
+    return null;
+  }
+  const text = `${typed.message ?? ""} ${typed.details ?? ""}`.toLowerCase();
+  if (!text.includes("schema cache")) {
+    return null;
+  }
+  return (
+    "Food Tracker backend schema not initialized for this project. " +
+    "Please run Food Tracker migrations on the configured Supabase project (see README and PLAN.md) " +
+    "and refresh."
+  );
+};
+
 const buildEditDraftFromEntry = (
   entry: FoodEntryWithNutrients,
   nutrientDefinitions: NutrientDefinition[],
@@ -197,6 +213,14 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       }),
     ]);
 
+    const schemaError =
+      getBackendSchemaError(roleData.error) ?? getBackendSchemaError(nutrientData.error);
+    if (schemaError) {
+      setError(schemaError);
+      setLoading(false);
+      return;
+    }
+
     if (!roleData.error && roleData.data?.role) {
       setRole(roleData.data.role as FoodAccessLevel);
     }
@@ -222,6 +246,10 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       .order("name", { ascending: true });
 
     if (error) {
+      const schemaError = getBackendSchemaError(error);
+      if (schemaError) {
+        setError(schemaError);
+      }
       return;
     }
 
@@ -266,6 +294,10 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       .limit(250);
 
     if (error) {
+      const schemaError = getBackendSchemaError(error);
+      if (schemaError) {
+        setError(schemaError);
+      }
       return;
     }
 
