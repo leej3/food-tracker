@@ -168,3 +168,10 @@ The first release intentionally favors simplicity and a single deployed app:
   - real-stack e2e test passes with local Supabase.
 - 2026-03-22: Added Cloudflare Pages deployment scaffold (wrangler config + deploy script).
 - 2026-03-22: Aligned Cloudflare deploy flow with consistency-tracker pattern (push-to-main GitHub Action).
+- 2026-03-22: Created GitHub repository `leej3/food-tracker` and set default branch to `main`.
+- 2026-03-22: Added GitHub Actions secrets: `CF_API_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
+- 2026-03-22: Created Cloudflare Pages project `food-tracker` in account `fd50ad223bc35ee2f616ec01a9a8858e`.
+- 2026-03-22: Triggered and validated CI deploy to Cloudflare Pages.
+  - Production URL: `https://food-tracker-7qq.pages.dev`.
+  - Deployment commit SHA: `961d6f8`.
+- 2026-03-22: Note: `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` were populated from available `.env` sources; replace with hosted Supabase production values before first external user traffic if needed.
