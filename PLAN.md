@@ -170,9 +170,10 @@ The first release intentionally favors simplicity and a single deployed app:
 - 2026-03-22: Aligned Cloudflare deploy flow with consistency-tracker pattern (push-to-main GitHub Action).
 - 2026-03-22: Created GitHub repository `leej3/food-tracker` and set default branch to `main`.
 - 2026-03-22: Added GitHub Actions secrets: `CF_API_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
-- 2026-03-22: Updated `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` secrets to match the deployed consistency-tracker production values:
-  - `https://gkfqwrfunkrpxynslwfn.supabase.co`
-  - `REMOVED_SUPABASE_LEGACY_ANON_KEY`.
+- 2026-03-22: Updated `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` secrets to match the deployed consistency-tracker production values.
+- 2026-03-22: Synced secrets used in build step to:
+  - `VITE_SUPABASE_URL`: `https://gkfqwrfunkrpxynslwfn.supabase.co`
+  - `VITE_SUPABASE_ANON_KEY`: `consistency-tracker-production-anon-key`
 - 2026-03-22: Created Cloudflare Pages project `food-tracker` in account `fd50ad223bc35ee2f616ec01a9a8858e`.
 - 2026-03-22: Triggered and validated CI deploy to Cloudflare Pages.
   - Production URL: `https://food-tracker-7qq.pages.dev`.
