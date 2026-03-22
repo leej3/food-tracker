@@ -1,0 +1,61 @@
+{
+  "name": "food-tracker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 3000",
+    "dev:local": "npm run supabase:start && npm run supabase:env:write && npm run dev",
+    "dev:local:init": "npm run supabase:start && npm run supabase:env:write && npm run dev",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview",
+    "supabase:start": "bash scripts/supabase-start-cached.sh",
+    "supabase:stop": "npx --yes supabase stop",
+    "supabase:status": "npx --yes supabase status",
+    "supabase:reset": "npx --yes supabase db reset",
+    "supabase:env": "npx --yes supabase status -o env",
+    "supabase:env:write": "bash scripts/write-local-env.sh",
+    "supabase:seed:local-admins": "node scripts/seed-local-admin.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run test && npm run build",
+    "lint": "eslint src",
+    "format": "prettier . --check",
+    "format:write": "prettier . --write",
+    "test": "echo \"No unit test suite configured yet.\""
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.55.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "recharts": "^2.15.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@playwright/test": "^1.52.0",
+    "@typescript-eslint/eslint-plugin": "^8.25.0",
+    "@typescript-eslint/parser": "^8.25.0",
+    "eslint": "^9.21.0",
+    "eslint-config-prettier": "^10.1.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.19",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.2.10",
+    "prettier": "^3.4.2",
+    "typescript": "~5.7.3",
+    "typescript-eslint": "^8.25.0",
+    "vite": "^6.0.5",
+    "@vitejs/plugin-react": "^4.3.4"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,css,md,html,yml,yaml}": [
+      "prettier --write"
+    ]
+  }
+}
