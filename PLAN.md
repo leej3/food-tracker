@@ -148,6 +148,12 @@ The first release intentionally favors simplicity and a single deployed app:
 - Confirm real-stack end-to-end Playwright:
   - local mock test path passes.
   - real local-stack test path passes.
+- Cloudflare deployment readiness:
+  - `wrangler.toml` exists with `pages_build_output_dir = "dist"`.
+  - `npm run deploy:cloudflare` builds and deploys static assets.
+  - production variables are configured in Cloudflare Pages:
+    - `VITE_SUPABASE_URL`
+    - `VITE_SUPABASE_ANON_KEY`.
 
 ## 7) Progress log
 
@@ -157,3 +163,4 @@ The first release intentionally favors simplicity and a single deployed app:
 - 2026-03-22: Verified Playwright:
   - mocked e2e test passes.
   - real-stack e2e test passes with local Supabase.
+- 2026-03-22: Added Cloudflare Pages deployment scaffold (wrangler config + deploy script).

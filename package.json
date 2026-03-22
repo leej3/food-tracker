@@ -9,6 +9,7 @@
     "dev:local:init": "npm run supabase:start && npm run supabase:env:write && npm run dev",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
+    "deploy:cloudflare": "npm run build && npx wrangler pages deploy dist --project-name food-tracker",
     "supabase:start": "bash scripts/supabase-start-cached.sh",
     "supabase:stop": "npx --yes supabase stop",
     "supabase:status": "npx --yes supabase status",

@@ -32,6 +32,22 @@ npm run dev
 - `npm run supabase:seed:local-admins` (optional): set `FOOD_ADMIN_EMAILS` and
   `ADMIN_PASSWORD` environment variables before running to ensure those users exist.
 
+## Deploy to Cloudflare Pages
+
+```bash
+cd sites/food-tracker
+npm run build
+npx wrangler login
+npm run deploy:cloudflare
+```
+
+Production environment variables in Cloudflare Pages:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+`wrangler.toml` is configured as a Pages project using `dist` as the build output.
+
 ## Environment variables
 
 - Front-end:
