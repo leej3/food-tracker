@@ -34,19 +34,26 @@ npm run dev
 
 ## Deploy to Cloudflare Pages
 
-```bash
-cd sites/food-tracker
-npm run build
-npx wrangler login
-npm run deploy:cloudflare
-```
+The production deploy flow follows the `consistency-tracker` pattern:
 
-Production environment variables in Cloudflare Pages:
+- GitHub Action `.github/workflows/deploy.yml` deploys to Cloudflare Pages on pushes to `main`.
+- Build uses `npm run build` with production environment variables injected from repository secrets.
+- Deploy is executed with `wrangler pages deploy` using the `food-tracker` project.
+
+Required repository secrets for GitHub Actions:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
+- `CF_API_KEY` (Cloudflare API token for `wrangler`, mapped to `CLOUDFLARE_API_TOKEN` in the workflow)
 
-`wrangler.toml` is configured as a Pages project using `dist` as the build output.
+Local one-off deploy still works with:
+
+```bash
+cd sites/food-tracker
+export CLOUDFLARE_API_TOKEN=...
+npm run build
+npm run deploy:cloudflare
+```
 
 ## Environment variables
 

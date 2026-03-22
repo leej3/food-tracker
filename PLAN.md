@@ -149,11 +149,14 @@ The first release intentionally favors simplicity and a single deployed app:
   - local mock test path passes.
   - real local-stack test path passes.
 - Cloudflare deployment readiness:
+  - GitHub Action `.github/workflows/deploy.yml` deploys on `main`.
+  - project name set to `food-tracker` and deploy command matches consistency-tracker style.
   - `wrangler.toml` exists with `pages_build_output_dir = "dist"`.
-  - `npm run deploy:cloudflare` builds and deploys static assets.
+  - local `npm run deploy:cloudflare` remains for one-off deploys.
   - production variables are configured in Cloudflare Pages:
     - `VITE_SUPABASE_URL`
     - `VITE_SUPABASE_ANON_KEY`.
+  - `CF_API_KEY` is used in CI (`CLOUDFLARE_API_TOKEN`).
 
 ## 7) Progress log
 
@@ -164,3 +167,4 @@ The first release intentionally favors simplicity and a single deployed app:
   - mocked e2e test passes.
   - real-stack e2e test passes with local Supabase.
 - 2026-03-22: Added Cloudflare Pages deployment scaffold (wrangler config + deploy script).
+- 2026-03-22: Aligned Cloudflare deploy flow with consistency-tracker pattern (push-to-main GitHub Action).

@@ -1,0 +1,49 @@
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+  deployments: write
+
+env:
+  PROJECT_NAME: food-tracker
+  BUILD_DIR: dist
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build app
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: npm run build
+
+      - name: Verify output
+        run: test -f "${BUILD_DIR}/index.html"
+
+      - name: Install wrangler
+        run: npm install -g wrangler@4.68.0
+
+      - name: Deploy production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_KEY }}
+        run: |
+          wrangler pages deploy ./${{ env.BUILD_DIR }} \
+            --project-name ${{ env.PROJECT_NAME }} \
+            --branch main \
+            --commit-dirty=true
