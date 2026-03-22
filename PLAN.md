@@ -160,7 +160,7 @@ The first release intentionally favors simplicity and a single deployed app:
 
 ## 7) Progress log
 
-- 2026-03-22: Migrated implementation to `/Users/johnlee/code/website-management/sites/food-tracker`.
+- 2026-03-22: Migrated implementation to `/Users/johnlee/code/website-management/sites/food-tracker` and then corrected to `/Users/johnlee/code/websites-management/sites/food-tracker` (parent repo alignment).
 - 2026-03-22: Stabilized local startup flow (idempotent startup, stale container cleanup).
 - 2026-03-22: Fixed migration compatibility issues for local Postgres images.
 - 2026-03-22: Verified Playwright:
@@ -170,8 +170,11 @@ The first release intentionally favors simplicity and a single deployed app:
 - 2026-03-22: Aligned Cloudflare deploy flow with consistency-tracker pattern (push-to-main GitHub Action).
 - 2026-03-22: Created GitHub repository `leej3/food-tracker` and set default branch to `main`.
 - 2026-03-22: Added GitHub Actions secrets: `CF_API_KEY`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
+- 2026-03-22: Updated `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` secrets to match the deployed consistency-tracker production values:
+  - `https://gkfqwrfunkrpxynslwfn.supabase.co`
+  - `REMOVED_SUPABASE_LEGACY_ANON_KEY`.
 - 2026-03-22: Created Cloudflare Pages project `food-tracker` in account `fd50ad223bc35ee2f616ec01a9a8858e`.
 - 2026-03-22: Triggered and validated CI deploy to Cloudflare Pages.
   - Production URL: `https://food-tracker-7qq.pages.dev`.
-  - Deployment commit SHA: `961d6f8`.
-- 2026-03-22: Note: `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` were populated from available `.env` sources; replace with hosted Supabase production values before first external user traffic if needed.
+  - Latest successful deployment after prod secret refresh: `https://bbd626aa.food-tracker-7qq.pages.dev` (commit `2fad783`).
+- 2026-03-22: Production login failure was traced to local-only Supabase env values in build-time secrets; corrected to hosted values used by consistency-tracker.
