@@ -41,6 +41,8 @@ Production URL:
 The production deploy flow follows the `consistency-tracker` pattern:
 
 - GitHub Action `.github/workflows/deploy.yml` deploys to Cloudflare Pages on pushes to `main`.
+- CI now runs lint, typecheck, Vitest coverage, and mocked Playwright before deploy.
+- The deploy workflow bootstraps the Food Tracker Supabase schema before Cloudflare publish.
 - Build uses `npm run build` with production environment variables injected from repository secrets.
 - Deploy is executed with `wrangler pages deploy` using the `food-tracker` project.
 
@@ -48,7 +50,12 @@ Required repository secrets for GitHub Actions:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
+- `SUPABASE_DB_URL`
 - `CF_API_KEY` (Cloudflare API token for `wrangler`, mapped to `CLOUDFLARE_API_TOKEN` in the workflow)
+- Optional: `FOOD_TRACKER_DB_BOOTSTRAP`
+  - `apply_if_missing` (default): verify schema, and rebuild it only if required tables are missing.
+  - `reset_and_reseed`: always drop Food Tracker-managed objects and reapply migrations before deploy.
+  - `check`: verify only and fail deploy if schema is missing.
 
 Note: URLs that include a deployment hash (for example `https://<deployment-id>.food-tracker-7qq.pages.dev`) are immutable snapshots.
 If signup/login fails on one of those URLs, open the main project URL above for the latest build.
@@ -62,31 +69,38 @@ npm run build
 npm run deploy:cloudflare
 ```
 
-## Production DB bootstrap (critical after initial deploy)
+## Production DB bootstrap
 
 Current production URL:
 
 - https://food-tracker-7qq.pages.dev
 
-The app ships with full food-tracker migrations, but the hosted Supabase project currently needs schema application once per new project or first deployment.
+Deploy no longer assumes schema already exists. The GitHub Action runs:
 
-If you see 404 console errors for any of:
+1. `npm run supabase:schema:bootstrap`
+2. `npm run supabase:schema:check`
+3. `npm run build`
+4. Cloudflare Pages deploy
 
-- `nutrient_definitions`
-- `user_roles`
-- `family_members`
+The bootstrap script manages only Food Tracker-owned objects. It does not `drop schema public cascade`.
+If schema is missing or partially incompatible, it resets the Food Tracker tables, types, functions, storage bucket policies, and replays the migration SQL in `supabase/migrations`.
 
-run migration SQL in that project's Supabase SQL Editor (or with a direct SQL runner that has service-role privileges).
+Useful local/manual commands:
 
-Suggested order:
+```bash
+cd sites/food-tracker
+export VITE_SUPABASE_URL=...
+export VITE_SUPABASE_ANON_KEY=...
+export SUPABASE_DB_URL=...
+npm run supabase:schema:check
+npm run supabase:schema:bootstrap
+```
 
-1. Open Supabase → SQL Editor.
-2. Run the SQL from:
-   - `supabase/migrations/0001_init.sql`
-   - `supabase/migrations/0002_user_directory.sql`
-   - `supabase/migrations/0004_auto_self_access_and_inference_events.sql`
-   - `supabase/migrations/0005_update_food_entry_with_values.sql`
-3. Re-run the app at `https://food-tracker-7qq.pages.dev` and refresh.
+If you need a forced rebuild of Food Tracker-managed database objects:
+
+```bash
+FOOD_TRACKER_DB_BOOTSTRAP=reset_and_reseed npm run supabase:schema:bootstrap
+```
 
 Quick verification (expected 200, JSON array response, not 404):
 
@@ -99,6 +113,29 @@ curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON
 ```
 
 If these requests return `PGRST205` errors, the database schema still does not include the food-tracker tables.
+
+## Testing
+
+Core local checks now available:
+
+```bash
+npm run lint
+npm run typecheck
+npm run test:unit
+npm run test:integration
+npm run test:coverage
+npm run test:e2e
+npm run ci
+```
+
+Coverage includes:
+
+- unit tests for fuzzy search, queue persistence, and entry payload validation
+- integration tests for bootstrap/schema handling and `FoodTrackerPage`
+- Playwright regression tests for:
+  - manual sign-in + entry flow
+  - schema-missing bootstrap message
+  - photo analyze/apply/follow-up/finalize flow
 
 ## Environment variables
 

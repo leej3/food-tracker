@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   AVAILABLE_METRICS,
@@ -14,6 +14,22 @@ import {
 } from "../lib/types";
 import { supabase } from "../lib/supabase";
 import { buildHistorySuggestions, buildNutrientMap } from "../lib/fuzzy";
+import {
+  buildEmptyValueMap,
+  getAppErrorMessage,
+  isTransientNetworkError,
+  loadAiStatesForEntries,
+  loadBootstrapData,
+  loadFoodEntries,
+} from "../lib/backend";
+import {
+  buildEditedNutrientPayload,
+  buildManualDraftPayload,
+  toLocalMinuteInput,
+  toIsoMinute,
+  validateEditableEntryDraft,
+  validateManualDraftPayload,
+} from "../lib/food-entry";
 import {
   type QueuedManualEntry,
   enqueueManualEntry,
@@ -81,42 +97,9 @@ const METRIC_NAMES: Record<NutrientCode, string> = {
   alcohol_g: "Alcohol (g)",
 };
 
-const toLocalMinuteInput = (value: Date): string => {
-  const date = new Date(value);
-  date.setSeconds(0, 0);
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}T${hour}:${minute}`;
-};
-
-const toIsoMinute = (value: string): string => {
-  const [datePart, timePart] = value.split("T");
-  const [y, m, d] = datePart.split("-").map((part) => Number.parseInt(part, 10));
-  const [hh, mm] = timePart.split(":").map((part) => Number.parseInt(part, 10));
-  return new Date(y, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0, 0).toISOString();
-};
-
 const getNutrientAmount = (entry: FoodEntryWithNutrients, code: NutrientCode): number => {
   const row = entry.food_entry_nutrients.find((nutrient) => nutrient.nutrient_code === code);
   return row ? row.amount : 0;
-};
-
-const getBackendSchemaError = (error: unknown): string | null => {
-  const typed = error as { code?: string; message?: string; details?: string } | null;
-  if (!typed || typed.code !== "PGRST205") {
-    return null;
-  }
-  const text = `${typed.message ?? ""} ${typed.details ?? ""}`.toLowerCase();
-  if (!text.includes("schema cache")) {
-    return null;
-  }
-  return (
-    "Food Tracker backend schema not initialized for this project. " +
-    "Please run Food Tracker migrations on the configured Supabase project (see README and PLAN.md) " +
-    "and refresh."
-  );
 };
 
 const buildEditDraftFromEntry = (
@@ -176,26 +159,30 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     window.addEventListener("online", onLine);
     window.addEventListener("offline", onOffline);
 
-    void loadBootstrap();
+    void (async () => {
+      setError("");
+      setLoading(true);
+      try {
+        const bootstrap = await loadBootstrapData(supabase, session.user.id);
+        setRole(bootstrap.role);
+        setNutrientDefinitions(bootstrap.nutrients);
+        setNutrientValues(buildEmptyValueMap(bootstrap.nutrients.map((row) => row.code)));
+        setMembers(bootstrap.members);
+        if (!selectedMemberId && bootstrap.members.length > 0) {
+          setSelectedMemberId(bootstrap.members[0].id);
+        }
+        await loadQueued();
+      } catch (err) {
+        setError(getAppErrorMessage(err, "Unable to load Food Tracker."));
+      }
+      setLoading(false);
+    })();
 
     return () => {
       window.removeEventListener("online", onLine);
       window.removeEventListener("offline", onOffline);
     };
-  }, []);
-
-  useEffect(() => {
-    if (!selectedMemberId) {
-      setEntries([]);
-      setHistoryItemNames([]);
-      setReviewEntryId("");
-      setEditingEntryId("");
-      setEditDraft(null);
-      return;
-    }
-
-    void loadEntriesForMember(selectedMemberId);
-  }, [selectedMemberId]);
+  }, [selectedMemberId, session.user.id]);
 
   useEffect(() => {
     if (entryMode === "manual") {
@@ -203,62 +190,18 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     }
   }, [entryMode]);
 
-  const loadBootstrap = async () => {
-    setError("");
-    setLoading(true);
-    const [roleData, nutrientData] = await Promise.all([
-      supabase.from("user_roles").select("role").eq("user_id", session.user.id).maybeSingle(),
-      supabase.from("nutrient_definitions").select("code,name,unit,category").eq("is_active", true).order("sort_order", {
-        ascending: true,
-      }),
-    ]);
-
-    const schemaError =
-      getBackendSchemaError(roleData.error) ?? getBackendSchemaError(nutrientData.error);
-    if (schemaError) {
-      setError(schemaError);
-      setLoading(false);
-      return;
-    }
-
-    if (!roleData.error && roleData.data?.role) {
-      setRole(roleData.data.role as FoodAccessLevel);
-    }
-
-    if (!nutrientData.error) {
-      setNutrientDefinitions((nutrientData.data as NutrientDefinition[]) ?? []);
-      setNutrientValues((nutrientData.data ?? []).reduce<Record<string, string>>((acc, row) => {
-        acc[row.code] = "";
-        return acc;
-      }, {}));
-    }
-
-    await loadMembers();
-    await loadQueued();
-    setLoading(false);
-  };
-
-  const loadMembers = async () => {
-    const { data, error } = await supabase
-      .from("family_members")
-      .select("id,name,canonical_slug,is_active,default_timezone")
-      .eq("is_active", true)
-      .order("name", { ascending: true });
-
-    if (error) {
-      const schemaError = getBackendSchemaError(error);
-      if (schemaError) {
-        setError(schemaError);
+  const loadMembers = useCallback(async () => {
+    try {
+      const bootstrap = await loadBootstrapData(supabase, session.user.id);
+      setRole(bootstrap.role);
+      setMembers(bootstrap.members);
+      if (!selectedMemberId && bootstrap.members.length > 0) {
+        setSelectedMemberId(bootstrap.members[0].id);
       }
-      return;
+    } catch (err) {
+      setError(getAppErrorMessage(err, "Unable to refresh tracked people."));
     }
-
-    const next = (data ?? []) as FamilyMember[];
-    setMembers(next);
-    if (!selectedMemberId && next.length > 0) {
-      setSelectedMemberId(next[0].id);
-    }
-  };
+  }, [selectedMemberId, session.user.id]);
 
   const loadQueued = async () => {
     setQueued(getQueuedManualEntries());
@@ -274,7 +217,10 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       try {
         await insertManualEntry(item.payload);
         removeQueuedEntry(item.id);
-      } catch {
+      } catch (err) {
+        if (!isTransientNetworkError(err)) {
+          setError(getAppErrorMessage(err, "Unable to sync queued entries."));
+        }
         break;
       }
     }
@@ -283,106 +229,59 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     setSyncingQueue(false);
   };
 
-  const loadEntriesForMember = async (memberId: string) => {
-    const { data: entriesData, error } = await supabase
-      .from("food_entries")
-      .select(
-        `id,member_id,logged_by_user_id,photo_storage_path,consumed_at,item_name,meal_type,serving_qty,serving_unit,workflow_state,source_confidence,source_label,manual_notes,created_at,updated_at,food_entry_nutrients(nutrient_code,amount,unit,source,source_confidence)`,
-      )
-      .eq("member_id", memberId)
-      .order("consumed_at", { ascending: false })
-      .limit(250);
+  const loadEntriesForMember = useCallback(async (memberId: string) => {
+    try {
+      const normalized = await loadFoodEntries(supabase, memberId);
+      setEntries(normalized);
 
-    if (error) {
-      const schemaError = getBackendSchemaError(error);
-      if (schemaError) {
-        setError(schemaError);
+      if (editingEntryId && !normalized.some((entry) => entry.id === editingEntryId)) {
+        setEditingEntryId("");
+        setEditDraft(null);
       }
-      return;
+
+      if (reviewEntryId && !normalized.some((entry) => entry.id === reviewEntryId)) {
+        setReviewEntryId("");
+      }
+
+      const names = Array.from(new Set(normalized.map((entry) => entry.item_name.trim()).filter(Boolean)));
+      setHistoryItemNames(names);
+
+      const nextAi = await loadAiStatesForEntries(
+        supabase,
+        normalized.map((entry) => entry.id),
+      );
+
+      setAiByEntry(
+        Object.fromEntries(
+          Object.entries(nextAi).map(([entryId, snapshot]) => [
+            entryId,
+            {
+              loading: false,
+              session: snapshot.session,
+              clarifyingQuestions: snapshot.clarifyingQuestions,
+              candidates: snapshot.candidates,
+              followUp: "",
+            } satisfies AiFlowState,
+          ]),
+        ),
+      );
+    } catch (err) {
+      setError(getAppErrorMessage(err, "Unable to load entries for this person."));
     }
+  }, [editingEntryId, reviewEntryId]);
 
-    const raw = (entriesData ?? []) as Array<
-      FoodEntryWithNutrients & {
-        food_entry_nutrients: Array<{
-          nutrient_code: string;
-          amount: number;
-          unit: string;
-          source: "guessed" | "edited" | "verified" | "manual";
-          source_confidence: number;
-        }>;
-      }
-    >;
-
-    const normalized: FoodEntryWithNutrients[] = raw.map((entry) => ({
-      ...entry,
-      food_entry_nutrients: entry.food_entry_nutrients ?? [],
-    }));
-
-    setEntries(normalized);
-
-    if (editingEntryId && !normalized.some((entry) => entry.id === editingEntryId)) {
+  useEffect(() => {
+    if (!selectedMemberId) {
+      setEntries([]);
+      setHistoryItemNames([]);
+      setReviewEntryId("");
       setEditingEntryId("");
       setEditDraft(null);
-    }
-
-    if (reviewEntryId && !normalized.some((entry) => entry.id === reviewEntryId)) {
-      setReviewEntryId("");
-    }
-
-    const names = Array.from(new Set(normalized.map((entry) => entry.item_name.trim()).filter(Boolean)));
-    setHistoryItemNames(names);
-
-    await loadAiStates(normalized.map((entry) => entry.id));
-  };
-
-  const loadAiStates = async (entryIds: string[]) => {
-    if (entryIds.length === 0) {
-      setAiByEntry({});
       return;
     }
 
-    const { data: sessionData, error: sessionError } = await supabase
-      .from("food_ai_sessions")
-      .select("id,entry_id,current_round,state,model,overall_confidence,clarifying_questions")
-      .in("entry_id", entryIds);
-
-    if (sessionError) {
-      return;
-    }
-
-    const sessions = (sessionData ?? []).filter((row) => {
-      return entryIds.includes(row.entry_id);
-    }) as AiSession[];
-
-    const nextAi: Record<string, AiFlowState> = {};
-
-    const sessionIds = sessions.map((item) => item.id);
-    const { data: candidateData } = await supabase
-      .from("food_ai_candidates")
-      .select("id,session_id,position,item_name,serving_qty,serving_unit,confidence,rationale,payload,is_selected")
-      .in("session_id", sessionIds)
-      .order("position", { ascending: true });
-
-    const candidatesBySession = new Map<string, AiCandidate[]>();
-    (candidateData ?? []).forEach((candidate) => {
-      const typed = candidate as unknown as AiCandidate;
-      const nextList = candidatesBySession.get(candidate.session_id) ?? [];
-      nextList.push(typed);
-      candidatesBySession.set(candidate.session_id, nextList);
-    });
-
-    for (const sessionRow of sessions) {
-      nextAi[sessionRow.entry_id] = {
-        loading: false,
-        session: sessionRow,
-        clarifyingQuestions: sessionRow.clarifying_questions ?? [],
-        candidates: candidatesBySession.get(sessionRow.id) ?? [],
-        followUp: "",
-      };
-    }
-
-    setAiByEntry(nextAi);
-  };
+    void loadEntriesForMember(selectedMemberId);
+  }, [loadEntriesForMember, selectedMemberId]);
 
   const insertManualEntry = async (payload: ManualDraftPayload): Promise<void> => {
     const entryPayload = {
@@ -403,7 +302,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       .single();
 
     if (entryError || !newEntry) {
-      throw new Error(entryError?.message ?? "Unable to save entry.");
+      throw new Error(getAppErrorMessage(entryError, "Unable to save entry."));
     }
 
     const nutrients = Object.entries(payload.nutrients)
@@ -442,7 +341,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     if (nutrients.length > 0) {
       const { error: nutrientError } = await supabase.from("food_entry_nutrients").insert(nutrients);
       if (nutrientError) {
-        throw new Error("Saved entry, but failed to store nutrients.");
+        throw new Error(getAppErrorMessage(nutrientError, "Saved entry, but failed to store nutrients."));
       }
     }
   };
@@ -457,46 +356,31 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     setMessage("");
     setSubmitting(true);
 
-    const payload: ManualDraftPayload = {
-      member_id: selectedMemberId,
-      item_name: form.itemName,
-      consumed_at: toIsoMinute(form.consumedAt),
-      meal_type: form.mealType,
-      serving_qty: Number.parseFloat(form.servingQty),
-      serving_unit: form.servingUnit,
-      manual_notes: form.manualNotes,
-      nutrients: Object.fromEntries(
-        Object.entries(nutrientValues)
-          .map(([code, value]) => {
-            const parsed = Number.parseFloat(value);
-            if (!Number.isFinite(parsed) || parsed < 0) {
-              return null;
-            }
-            return [code, parsed];
-          })
-          .filter((entry): entry is [string, number] => Boolean(entry)) as Array<[string, number]>,
-      ),
-    };
+    const payload = buildManualDraftPayload({
+      memberId: selectedMemberId,
+      itemName: form.itemName,
+      consumedAt: form.consumedAt,
+      mealType: form.mealType,
+      servingQty: form.servingQty,
+      servingUnit: form.servingUnit,
+      manualNotes: form.manualNotes,
+      nutrientValues,
+    });
 
-    if (!payload.item_name.trim()) {
-      setError("Item name is required.");
+    const validationError = validateManualDraftPayload(payload);
+    if (validationError) {
+      setError(validationError);
       setSubmitting(false);
       return;
     }
-    if (!Number.isFinite(payload.serving_qty) || payload.serving_qty <= 0) {
-      setError("Serving quantity must be a positive number.");
-      setSubmitting(false);
-      return;
-    }
+
     if (!navigator.onLine) {
       enqueueManualEntry(payload);
       setMessage("Saved locally. It will sync when online.");
       setQueued(getQueuedManualEntries());
       setSubmitting(false);
       setForm(initialFormState());
-      setNutrientValues((prev) =>
-        Object.fromEntries(Object.keys(prev).map((code) => [code, ""])) as Record<string, string>,
-      );
+      setNutrientValues((prev) => buildEmptyValueMap(Object.keys(prev)));
       return;
     }
 
@@ -504,14 +388,16 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       await insertManualEntry(payload);
       setMessage("Entry saved.");
       setForm(initialFormState());
-      setNutrientValues((prev) =>
-        Object.fromEntries(Object.keys(prev).map((code) => [code, ""])) as Record<string, string>,
-      );
+      setNutrientValues((prev) => buildEmptyValueMap(Object.keys(prev)));
       await loadEntriesForMember(selectedMemberId);
     } catch (err) {
-      enqueueManualEntry(payload);
-      setMessage("Saved offline due to network issue; queued for retry.");
-      setQueued(getQueuedManualEntries());
+      if (!navigator.onLine || isTransientNetworkError(err)) {
+        enqueueManualEntry(payload);
+        setMessage("Saved offline due to network issue; queued for retry.");
+        setQueued(getQueuedManualEntries());
+      } else {
+        setError(getAppErrorMessage(err, "Unable to save entry."));
+      }
     } finally {
       setSubmitting(false);
     }
@@ -521,6 +407,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     const result = await supabase.functions.invoke<{
       session: {
         id: string;
+        current_round?: number;
         state: string;
         overall_confidence: number;
         clarifying_questions: string[];
@@ -534,7 +421,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       },
     });
     if (result.error) {
-      throw new Error(result.error.message);
+      throw new Error(getAppErrorMessage(result.error, "Unable to analyze photo."));
     }
 
     const nextSession = result.data?.session;
@@ -547,13 +434,13 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       [entryId]: {
         ...prev[entryId],
         loading: false,
-        session: {
-          id: nextSession.id,
-          entry_id: entryId,
-          current_round: 1,
-          state: (nextSession.state as unknown as AiSession["state"]) ?? "candidate",
-          model: "gpt-5.4-nano",
-          overall_confidence: nextSession.overall_confidence,
+      session: {
+        id: nextSession.id,
+        entry_id: entryId,
+        current_round: nextSession.current_round ?? 1,
+        state: (nextSession.state as unknown as AiSession["state"]) ?? "candidate",
+        model: "gpt-5.4-nano",
+        overall_confidence: nextSession.overall_confidence,
           clarifying_questions: nextSession.clarifying_questions ?? [],
         },
         clarifyingQuestions: nextSession.clarifying_questions ?? [],
@@ -577,6 +464,19 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     setError("");
     setMessage("");
 
+    const photoServingQty = Number.parseFloat(form.servingQty);
+    if (!Number.isFinite(photoServingQty) || photoServingQty <= 0) {
+      setError("Serving quantity must be a positive number.");
+      setSubmitting(false);
+      return;
+    }
+
+    if (!form.servingUnit.trim()) {
+      setError("Serving unit is required.");
+      setSubmitting(false);
+      return;
+    }
+
     const cleanedFileName = form.itemName.trim() || "photo";
     const extension = photoFile.name.split(".").pop() ?? "jpg";
     const path = `${session.user.id}/${selectedMemberId}/${Date.now()}-${cleanedFileName.replace(/[^a-z0-9]/gi, "_").slice(0, 20)}.${extension}`;
@@ -584,7 +484,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       .from("food-photos")
       .upload(path, photoFile, { upsert: false, contentType: photoFile.type || "image/jpeg" });
     if (uploadError) {
-      setError(uploadError.message);
+      setError(getAppErrorMessage(uploadError, "Unable to upload photo."));
       setSubmitting(false);
       return;
     }
@@ -596,8 +496,8 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
         item_name: cleanedFileName,
         consumed_at: toIsoMinute(form.consumedAt),
         meal_type: form.mealType,
-        serving_qty: Number.parseFloat(form.servingQty),
-        serving_unit: form.servingUnit || "oz",
+        serving_qty: photoServingQty,
+        serving_unit: form.servingUnit.trim() || "oz",
         photo_storage_path: path,
         workflow_state: "analysis_pending",
         manual_notes: form.manualNotes || null,
@@ -606,7 +506,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       .single();
 
     if (entryError || !entryData?.id) {
-      setError(entryError?.message ?? "Unable to create entry.");
+      setError(getAppErrorMessage(entryError, "Unable to create entry."));
       setSubmitting(false);
       return;
     }
@@ -616,7 +516,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       setReviewEntryId(entryData.id);
       setMessage("Photo uploaded. AI candidates generated.");
     } catch (analyzeError) {
-      setError(analyzeError instanceof Error ? analyzeError.message : "Unable to analyze image.");
+      setError(getAppErrorMessage(analyzeError, "Unable to analyze image."));
     }
 
     setPhotoFile(null);
@@ -642,24 +542,22 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       p_candidate_id: candidateId,
     });
     if (error) {
-      setError(error.message);
+      setError(getAppErrorMessage(error, "Unable to apply candidate."));
       return;
     }
 
     setMessage("Candidate applied. You can still edit values before finalizing.");
     await loadEntriesForMember(selectedMemberId);
-    await loadAiStates(entries.map((entry) => entry.id));
   };
 
   const finalizeEntry = async (entryId: string) => {
     const { error } = await supabase.rpc("finalize_food_entry", { p_entry_id: entryId });
     if (error) {
-      setError(error.message);
+      setError(getAppErrorMessage(error, "Unable to finalize entry."));
       return;
     }
 
     await loadEntriesForMember(selectedMemberId);
-    await loadAiStates(entries.map((entry) => entry.id));
     setMessage("Entry finalized.");
   };
 
@@ -686,40 +584,19 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       return;
     }
 
-    const editedServingQty = Number.parseFloat(editDraft.servingQty);
-    if (!editDraft.itemName.trim()) {
-      setError("Item name is required.");
-      return;
-    }
-    if (!Number.isFinite(editedServingQty) || editedServingQty <= 0) {
-      setError("Serving quantity must be a positive number.");
-      return;
-    }
-    if (!editDraft.servingUnit.trim()) {
-      setError("Serving unit is required.");
+    const validationError = validateEditableEntryDraft(editDraft);
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
+    const editedServingQty = Number.parseFloat(editDraft.servingQty);
     setError("");
     setMessage("");
     setEditSubmitting(true);
 
     try {
-      const nutrients = Object.entries(editDraft.nutrients)
-        .map(([code, amountText]) => {
-          const amount = Number.parseFloat(amountText);
-          const definition = nutrientMap[code];
-          if (!Number.isFinite(amount) || amount < 0 || !definition) {
-            return null;
-          }
-
-          return {
-            nutrient_code: code,
-            amount,
-            unit: definition.unit,
-          };
-        })
-        .filter(Boolean) as Array<{ nutrient_code: string; amount: number; unit: string }>;
+      const nutrients = buildEditedNutrientPayload(editDraft.nutrients, nutrientMap);
 
       const { error } = await supabase.rpc("update_food_entry_with_values", {
         p_entry_id: editDraft.entryId,
@@ -733,7 +610,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       });
 
       if (error) {
-        setError(error.message);
+        setError(getAppErrorMessage(error, "Unable to update entry."));
         return;
       }
 
@@ -741,7 +618,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       await loadEntriesForMember(selectedMemberId);
       closeEdit();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to save edited entry.");
+      setError(getAppErrorMessage(err, "Unable to save edited entry."));
     } finally {
       setEditSubmitting(false);
     }
@@ -764,7 +641,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
         [entryId]: { ...prev[entryId], followUp: "" },
       }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Follow-up failed.");
+      setError(getAppErrorMessage(err, "Follow-up failed."));
       setAiByEntry((prev) => ({
         ...prev,
         [entryId]: { ...prev[entryId], loading: false },
@@ -774,9 +651,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
 
   const resetForm = () => {
     setForm(initialFormState());
-    setNutrientValues((prev) =>
-      Object.fromEntries(Object.keys(prev).map((key) => [key, ""])) as Record<string, string>,
-    );
+    setNutrientValues((prev) => buildEmptyValueMap(Object.keys(prev)));
   };
 
   const activeAi = reviewEntryId ? aiByEntry[reviewEntryId] : null;

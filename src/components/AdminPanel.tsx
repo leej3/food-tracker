@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FamilyMember, FoodAccessLevel, MemberAccess, UserDirectoryRow } from "../lib/types";
 import { supabase } from "../lib/supabase";
+import { getAppErrorMessage } from "../lib/backend";
 
 interface AdminPanelProps {
   members: FamilyMember[];
@@ -20,48 +21,60 @@ export const AdminPanel = ({ members, onMembersChanged }: AdminPanelProps) => {
   const [memberAccess, setMemberAccess] = useState<MemberAccess[]>([]);
   const [emailMap, setEmailMap] = useState<Record<string, string>>({});
 
+  const loadMemberAccess = async (memberId: string) => {
+    const { data, error } = await supabase
+      .from("member_access")
+      .select("id, member_id, user_id, access_level")
+      .eq("member_id", memberId)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      setAssignError(getAppErrorMessage(error, "Unable to load access assignments."));
+      setMemberAccess([]);
+      setEmailMap({});
+      return;
+    }
+
+    const access = (data ?? []) as MemberAccess[];
+    setMemberAccess(access);
+
+    const userIds = access.map((entry) => entry.user_id);
+    if (userIds.length === 0) {
+      setEmailMap({});
+      return;
+    }
+
+    const { data: users, error: userError } = await supabase
+      .from("user_directory")
+      .select("user_id,email")
+      .in("user_id", userIds);
+
+    if (userError) {
+      setAssignError(getAppErrorMessage(userError, "Unable to load user emails."));
+      setEmailMap({});
+      return;
+    }
+
+    const nextEmailMap: Record<string, string> = {};
+    (users ?? []).forEach((entry: { user_id: string; email: string }) => {
+      nextEmailMap[entry.user_id] = entry.email;
+    });
+    setEmailMap(nextEmailMap);
+  };
+
   useEffect(() => {
     if (!selectedMemberId) {
       setMemberAccess([]);
+      setEmailMap({});
       return;
     }
 
     let cancelled = false;
     (async () => {
-      const { data, error } = await supabase
-        .from("member_access")
-        .select("id, member_id, user_id, access_level")
-        .eq("member_id", selectedMemberId)
-        .order("created_at", { ascending: false });
-
       if (cancelled) {
         return;
       }
-
-      if (error) {
-        setMemberAccess([]);
-        return;
-      }
-
-      const access = (data ?? []) as MemberAccess[];
-      setMemberAccess(access);
-
-      const userIds = access.map((entry) => entry.user_id);
-      if (userIds.length === 0) {
-        setEmailMap({});
-        return;
-      }
-
-      const { data: users } = await supabase
-        .from("user_directory")
-        .select("user_id,email")
-        .in("user_id", userIds);
-
-      const nextEmailMap: Record<string, string> = {};
-      (users ?? []).forEach((entry: { user_id: string; email: string }) => {
-        nextEmailMap[entry.user_id] = entry.email;
-      });
-      setEmailMap(nextEmailMap);
+      await loadMemberAccess(selectedMemberId);
     })();
 
     return () => {
@@ -85,7 +98,7 @@ export const AdminPanel = ({ members, onMembersChanged }: AdminPanelProps) => {
 
     setMemberSaving(false);
     if (error) {
-      setMemberError(error.message);
+      setMemberError(getAppErrorMessage(error, "Unable to create person."));
       return;
     }
 
@@ -105,7 +118,7 @@ export const AdminPanel = ({ members, onMembersChanged }: AdminPanelProps) => {
       p_search: term,
     });
     if (error) {
-      setAssignError("Search failed. Make sure you are an admin.");
+      setAssignError(getAppErrorMessage(error, "Search failed. Make sure you are an admin."));
       setSearchResults([]);
       return;
     }
@@ -127,29 +140,38 @@ export const AdminPanel = ({ members, onMembersChanged }: AdminPanelProps) => {
     });
 
     if (error) {
-      setAssignError("Unable to save access. User may already have this assignment.");
+      setAssignError(getAppErrorMessage(error, "Unable to save access. User may already have this assignment."));
       return;
     }
 
     setSearchEmail("");
     setSearchResults([]);
     setSelectedUserId("");
-    const refreshed = selectedMemberId;
-    setSelectedMemberId(refreshed);
     await onMembersChanged();
+    await loadMemberAccess(selectedMemberId);
   };
 
   const changeAccess = async (access: MemberAccess, next: FoodAccessLevel) => {
-    await supabase
+    const { error } = await supabase
       .from("member_access")
       .update({ access_level: next })
       .eq("id", access.id);
+    if (error) {
+      setAssignError(getAppErrorMessage(error, "Unable to update access."));
+      return;
+    }
     await onMembersChanged();
+    await loadMemberAccess(access.member_id);
   };
 
   const removeAccess = async (access: MemberAccess) => {
-    await supabase.from("member_access").delete().eq("id", access.id);
+    const { error } = await supabase.from("member_access").delete().eq("id", access.id);
+    if (error) {
+      setAssignError(getAppErrorMessage(error, "Unable to remove access."));
+      return;
+    }
     await onMembersChanged();
+    await loadMemberAccess(access.member_id);
   };
 
   return (

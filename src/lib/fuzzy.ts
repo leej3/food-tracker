@@ -59,14 +59,17 @@ export const buildHistorySuggestions = (
   const suggestions = historyNames
     .map((name) => {
       const normalized = normalize(name);
-      const exact = normalized.includes(cleanInput) ? 1.2 : 0;
+      const exactMatch = normalized.includes(cleanInput);
+      const exact = exactMatch ? 1.2 : 0;
       const score = Math.max(exact, charBigramSimilarity(cleanInput, normalized));
       return {
         label: name,
+        normalized,
+        exactMatch,
         score,
       };
     })
-    .filter((item) => item.score > 0)
+    .filter((item) => item.score >= 0.45 && (item.exactMatch || item.normalized.startsWith(cleanInput[0] ?? "")))
     .sort((a, b) => b.score - a.score)
     .slice(0, 8)
     .map((item) => item.label);

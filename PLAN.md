@@ -81,6 +81,8 @@ The first release intentionally favors simplicity and a single deployed app:
   - `src/lib/types.ts`
   - `src/lib/fuzzy.ts`
   - `src/lib/queue.ts`
+  - `src/lib/backend.ts`
+  - `src/lib/food-entry.ts`
 - Auth pages:
   - `src/components/LoginPage.tsx`
   - `src/components/ResetPasswordPage.tsx`
@@ -102,6 +104,10 @@ The first release intentionally favors simplicity and a single deployed app:
   - candidate persistence with follow-up state transitions,
   - explicit "edit finalized entry" flow with save path,
   - offline queueing and retry,
+  - network-only queue fallback instead of queueing on every write failure,
+  - shared Supabase/bootstrap error handling and schema-ready messaging,
+  - tighter fuzzy history matching to reduce weak suggestions,
+  - Admin access assignment refresh after grant/update/remove,
   - local-first `supabase-start-cached` lock-based startup and stale-container cleanup,
   - migration compatibility updates for local Postgres image SQL support,
   - local inference telemetry persisted in `food_ai_inference_events`.
@@ -146,17 +152,27 @@ The first release intentionally favors simplicity and a single deployed app:
   - submit manual entry while offline
   - come back online and sync.
 - Confirm shadow + OpenAI fallback telemetry in `food_ai_inference_events`.
+- Confirm CI quality gate:
+  - `npm run lint`
+  - `npm run typecheck`
+  - `npm run test:coverage`
+  - `npm run test:e2e`
 - Confirm real-stack end-to-end Playwright:
   - local mock test path passes.
   - real local-stack test path passes.
 - Cloudflare deployment readiness:
-  - GitHub Action `.github/workflows/deploy.yml` deploys on `main`.
+  - GitHub Action `.github/workflows/deploy.yml` runs on PRs and deploys on `main`.
+  - deploy is blocked unless backend schema check passes.
+  - deploy bootstrap runs `npm run supabase:schema:bootstrap` before build/publish.
   - project name set to `food-tracker` and deploy command matches consistency-tracker style.
   - `wrangler.toml` exists with `pages_build_output_dir = "dist"`.
   - local `npm run deploy:cloudflare` remains for one-off deploys.
   - production variables are configured in Cloudflare Pages:
     - `VITE_SUPABASE_URL`
     - `VITE_SUPABASE_ANON_KEY`.
+  - backend deployment variables are configured in GitHub:
+    - `SUPABASE_DB_URL`
+    - optional `FOOD_TRACKER_DB_BOOTSTRAP`.
   - `CF_API_KEY` is used in CI (`CLOUDFLARE_API_TOKEN`).
 
 ## 8) Production schema remediation (current blocker)
@@ -167,11 +183,19 @@ The first release intentionally favors simplicity and a single deployed app:
   - `Could not find the table 'public.family_members'`
   means the Pages deployment is pointed at an existing Supabase project that has only the consistency-tracker schema (`people`, `consistency_entries`).
 - `food-tracker-7qq.pages.dev` is otherwise healthy; this is a backend schema mismatch.
-- Apply these migration files on the same Supabase project before using the app:
+- This is now addressed in-repo by deploy bootstrap:
+  - `scripts/bootstrap-supabase-schema.mjs`
+  - `scripts/check-supabase-schema.mjs`
+  - `scripts/supabase-schema-utils.mjs`
+- Bootstrap applies these migration files in order after resetting Food Tracker-owned objects:
   - `supabase/migrations/0001_init.sql`
   - `supabase/migrations/0002_user_directory.sql`
   - `supabase/migrations/0004_auto_self_access_and_inference_events.sql`
   - `supabase/migrations/0005_update_food_entry_with_values.sql`
+- Bootstrap modes:
+  - `apply_if_missing`
+  - `reset_and_reseed`
+  - `check`
 - After applying, verify with production anon key:
   - `curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/nutrient_definitions?select=*"`
   - `curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/user_roles?select=*"`
@@ -200,3 +224,8 @@ The first release intentionally favors simplicity and a single deployed app:
   - Latest successful deployment after prod secret refresh: `https://bbd626aa.food-tracker-7qq.pages.dev` (commit `2fad783`).
 - 2026-03-22: Production login failure was traced to local-only Supabase env values in build-time secrets; corrected to hosted values used by consistency-tracker.
 - 2026-03-22: Production app logs now show 404s for `nutrient_definitions`, `user_roles`, `family_members`; this indicates missing migration application on the shared Supabase backend and is blocked until migration SQL is applied.
+- 2026-03-22: Replaced simple deploy-only workflow with a CI + backend bootstrap + deploy pipeline.
+- 2026-03-22: Added shared bootstrap/data helpers and entry validation modules to reduce duplicated Supabase and form logic.
+- 2026-03-22: Added Vitest coverage for fuzzy search, queueing, entry validation, backend bootstrap loaders, and `FoodTrackerPage` schema handling.
+- 2026-03-22: Rewrote Playwright regression coverage to include manual entry, schema-missing bootstrap messaging, and photo analyze/apply/follow-up/finalize.
+- 2026-03-22: Local `npm run ci` passes end-to-end.
