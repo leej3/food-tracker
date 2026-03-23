@@ -169,7 +169,7 @@ The first release intentionally favors simplicity and a single deployed app:
   - local `npm run deploy:cloudflare` remains for one-off deploys.
   - production variables are configured in Cloudflare Pages:
     - `VITE_SUPABASE_URL`
-    - `VITE_SUPABASE_ANON_KEY`.
+    - `VITE_SUPABASE_PUBLISHABLE_KEY`.
   - backend deployment variables are configured in GitHub:
     - `SUPABASE_DB_URL`
     - optional `FOOD_TRACKER_DB_BOOTSTRAP`.
@@ -196,10 +196,10 @@ The first release intentionally favors simplicity and a single deployed app:
   - `apply_if_missing`
   - `reset_and_reseed`
   - `check`
-- After applying, verify with production anon key:
-  - `curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/nutrient_definitions?select=*"`
-  - `curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/user_roles?select=*"`
-  - `curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/family_members?select=*"`
+- After applying, verify with production publishable key:
+  - `curl -s -H "apikey: $SUPABASE_PUBLISHABLE_KEY" "$SUPABASE_URL/rest/v1/nutrient_definitions?select=*"`
+  - `curl -s -H "apikey: $SUPABASE_PUBLISHABLE_KEY" "$SUPABASE_URL/rest/v1/user_roles?select=*"`
+  - `curl -s -H "apikey: $SUPABASE_PUBLISHABLE_KEY" "$SUPABASE_URL/rest/v1/family_members?select=*"`
 - Expected output should be JSON array(s); `[]` is acceptable for new installs. 404 indicates schema is not loaded.
 
 ## 7) Progress log
@@ -229,3 +229,4 @@ The first release intentionally favors simplicity and a single deployed app:
 - 2026-03-22: Added Vitest coverage for fuzzy search, queueing, entry validation, backend bootstrap loaders, and `FoodTrackerPage` schema handling.
 - 2026-03-22: Rewrote Playwright regression coverage to include manual entry, schema-missing bootstrap messaging, and photo analyze/apply/follow-up/finalize.
 - 2026-03-22: Local `npm run ci` passes end-to-end.
+- 2026-03-23: Switched runtime and CI configuration to prefer `VITE_SUPABASE_PUBLISHABLE_KEY` with legacy env fallback during rotation.

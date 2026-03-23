@@ -32,9 +32,14 @@ const requiredEnv = (key) => {
   return value;
 };
 
+const getPublicApiKey = () =>
+  process.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
+  process.env.VITE_SUPABASE_ANON_KEY ??
+  requiredEnv("VITE_SUPABASE_PUBLISHABLE_KEY");
+
 export const getPublicApiConfig = () => ({
   url: requiredEnv("VITE_SUPABASE_URL"),
-  anonKey: requiredEnv("VITE_SUPABASE_ANON_KEY"),
+  apiKey: getPublicApiKey(),
 });
 
 export const createDbClient = () => {
@@ -47,14 +52,13 @@ export const createDbClient = () => {
   });
 };
 
-export const schemaCheck = async ({ url, anonKey, tables = REQUIRED_TABLES }) => {
+export const schemaCheck = async ({ url, apiKey, tables = REQUIRED_TABLES }) => {
   const failures = [];
 
   for (const table of tables) {
     const response = await fetch(`${url}/rest/v1/${table}?select=*&limit=1`, {
       headers: {
-        apikey: anonKey,
-        Authorization: `Bearer ${anonKey}`,
+        apikey: apiKey,
       },
     });
 

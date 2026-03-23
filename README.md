@@ -49,7 +49,7 @@ The production deploy flow follows the `consistency-tracker` pattern:
 Required repository secrets for GitHub Actions:
 
 - `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
 - `SUPABASE_DB_URL`
 - `CF_API_KEY` (Cloudflare API token for `wrangler`, mapped to `CLOUDFLARE_API_TOKEN` in the workflow)
 - Optional: `FOOD_TRACKER_DB_BOOTSTRAP`
@@ -90,7 +90,7 @@ Useful local/manual commands:
 ```bash
 cd sites/food-tracker
 export VITE_SUPABASE_URL=...
-export VITE_SUPABASE_ANON_KEY=...
+export VITE_SUPABASE_PUBLISHABLE_KEY=...
 export SUPABASE_DB_URL=...
 npm run supabase:schema:check
 npm run supabase:schema:bootstrap
@@ -106,10 +106,10 @@ Quick verification (expected 200, JSON array response, not 404):
 
 ```bash
 SUPABASE_URL=https://gkfqwrfunkrpxynslwfn.supabase.co
-SUPABASE_ANON_KEY=...
-curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/nutrient_definitions?select=*"
-curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/user_roles?select=*"
-curl -s -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" "$SUPABASE_URL/rest/v1/family_members?select=*"
+SUPABASE_PUBLISHABLE_KEY=...
+curl -s -H "apikey: $SUPABASE_PUBLISHABLE_KEY" "$SUPABASE_URL/rest/v1/nutrient_definitions?select=*"
+curl -s -H "apikey: $SUPABASE_PUBLISHABLE_KEY" "$SUPABASE_URL/rest/v1/user_roles?select=*"
+curl -s -H "apikey: $SUPABASE_PUBLISHABLE_KEY" "$SUPABASE_URL/rest/v1/family_members?select=*"
 ```
 
 If these requests return `PGRST205` errors, the database schema still does not include the food-tracker tables.
@@ -141,7 +141,7 @@ Coverage includes:
 
 - Front-end:
   - `VITE_SUPABASE_URL`
-  - `VITE_SUPABASE_ANON_KEY`
+  - `VITE_SUPABASE_PUBLISHABLE_KEY`
 - Function runtime:
   - `OPENAI_API_KEY`
   - `OPENAI_MODEL` (default `gpt-5.4-nano`)

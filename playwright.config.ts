@@ -18,7 +18,7 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   webServer: {
-    command: `VITE_SUPABASE_URL=${process.env.VITE_SUPABASE_URL ?? "https://test.supabase.co"} VITE_SUPABASE_ANON_KEY=eyJhbGciOiJub25lIn0.0eA VITE_IS_E2E=1 npm run dev -- --host 127.0.0.1 --port ${PORT}`,
+    command: `VITE_SUPABASE_URL=${process.env.VITE_SUPABASE_URL ?? "https://test.supabase.co"} VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_e2e_placeholder VITE_IS_E2E=1 npm run dev -- --host 127.0.0.1 --port ${PORT}`,
     url: `http://127.0.0.1:${PORT}`,
     timeout: 120_000,
     reuseExistingServer: !Boolean(process.env.CI),
