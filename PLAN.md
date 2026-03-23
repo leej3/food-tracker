@@ -231,3 +231,59 @@ The first release intentionally favors simplicity and a single deployed app:
 - 2026-03-22: Local `npm run ci` passes end-to-end.
 - 2026-03-23: Switched runtime and CI configuration to prefer `VITE_SUPABASE_PUBLISHABLE_KEY` with legacy env fallback during rotation.
 - 2026-03-23: Hardened schema bootstrap to retry public probe checks and emit actionable failure output when `SUPABASE_DB_URL` is not configured.
+- 2026-03-23: Migrated both `food-tracker` and `consistency-tracker` to publishable keys and disabled legacy Supabase JWT API keys for the shared project.
+
+## 9) Next execution plan: production photo-analysis smoke test + camera-first capture
+
+### Goal
+
+- Verify the production `food-tracker` photo-analysis flow end to end against the live hosted stack.
+- Make the mobile experience camera-first on iPhone while still supporting photo upload from library/files.
+- Ensure hosted AI analysis uses `OPENAI_API_KEY` in deployment, not a local-only secret path.
+
+### Product requirements
+
+- Primary mobile action should be "Take photo".
+- On supported mobile browsers, especially iPhone Safari, that action should open the camera directly.
+- Secondary action can be "Upload existing photo" for library/file selection.
+- Desktop should continue to support file upload without regression.
+- The same capture flow should feed the existing Supabase Storage + analysis pipeline.
+- Production analysis must authenticate to OpenAI using `OPENAI_API_KEY` in the deployed Supabase Edge Function environment.
+
+### Implementation plan
+
+- Split the current single photo input into two explicit actions:
+  - camera capture input using `accept="image/*"` and `capture="environment"`
+  - library/file upload input using `accept="image/*"` without `capture`
+- Keep both inputs behind shared upload + analysis handlers so the storage/inference path remains identical after file selection.
+- Add capability-aware UI copy:
+  - mobile-first label for camera path
+  - neutral upload fallback for desktop and unsupported browsers
+- Preserve resumable AI session behavior after either capture source.
+- Review edge-function deployment configuration and ensure `OPENAI_API_KEY` is present in hosted secrets for the `food-analyze` function.
+- Remove ambiguity in docs so production secret setup explicitly references `OPENAI_API_KEY`.
+
+### Verification plan
+
+- Manual production smoke test on iPhone:
+  - sign in
+  - tap "Take photo"
+  - confirm camera opens rather than file picker
+  - capture nutrition label or food image
+  - confirm upload, AI candidate generation, candidate apply, and finalize flow
+- Desktop/browser smoke test:
+  - confirm "Upload existing photo" still works
+  - confirm no regression in manual entry flow
+- Production console/network verification:
+  - no blocked mixed-content or invalid-key errors
+  - hosted function call succeeds
+  - storage upload succeeds
+- Secrets verification:
+  - Supabase hosted function environment includes `OPENAI_API_KEY`
+  - no dependency remains on disabled legacy Supabase JWT keys
+
+### Deliverables
+
+- camera-first production UX in the app
+- updated deployment/docs for `OPENAI_API_KEY`
+- recorded smoke-test results in this plan document after completion
