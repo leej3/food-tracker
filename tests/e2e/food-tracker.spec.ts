@@ -118,9 +118,11 @@ const mountSupabaseMocks = async (
       const payload = ((await request.postDataJSON()) ?? {}) as {
         entryId?: string;
         action?: "analyze" | "follow_up";
+        model?: string;
       };
       const entryId = payload.entryId ?? state.entries[0]?.id ?? "entry-1";
       const action = payload.action ?? "analyze";
+      const analyzeModel = payload.model?.trim() || "gpt-5.4-nano";
       const entry = state.entries.find((candidate) => candidate.id === entryId);
 
       if (action === "analyze") {
@@ -132,7 +134,7 @@ const mountSupabaseMocks = async (
             entry_id: entryId,
             current_round: 1,
             state: "ready_for_review",
-            model: "gpt-5.4-nano",
+            model: analyzeModel,
             overall_confidence: 0.82,
             clarifying_questions: ["Was this canned or homemade?"],
           },
@@ -195,7 +197,7 @@ const mountSupabaseMocks = async (
               }
             : null,
           candidates: state.aiCandidates,
-          inference_model: "gpt-5.4-nano",
+          inference_model: analyzeModel,
         },
       });
       return;
@@ -574,6 +576,7 @@ test("photo review flow supports analyze, apply, follow-up, and finalize", async
   await page
     .getByPlaceholder("Apple, toast, chicken breast...")
     .fill("Lunch photo");
+  await page.getByLabel("OpenAI model").fill("gpt-5.4-mini");
   await page.locator('input[data-testid="photo-input"]').setInputFiles({
     name: "meal.jpg",
     mimeType: "image/jpeg",
@@ -587,6 +590,7 @@ test("photo review flow supports analyze, apply, follow-up, and finalize", async
   await expect(
     page.locator("strong").filter({ hasText: "Tomato soup" }),
   ).toBeVisible();
+  await expect(page.getByText("OpenAI model: gpt-5.4-mini")).toBeVisible();
   await page.getByRole("button", { name: "Apply this candidate" }).click();
   await expect(page.getByText(/Candidate applied/i)).toBeVisible();
 

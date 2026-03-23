@@ -4,6 +4,7 @@ type AnalyzeBody = {
   entryId?: string;
   action?: "analyze" | "follow_up";
   message?: string;
+  model?: string;
 };
 
 type NutritionCandidate = {
@@ -30,8 +31,8 @@ type ModelResponse = {
   notes?: string;
 };
 
-type InferencePath = "shadow" | "shadow_fallback_to_openai" | "openai";
-type InferenceProvider = "shadow" | "openai";
+type InferencePath = "openai";
+type InferenceProvider = "openai";
 
 type InferenceResult = {
   provider: InferenceProvider;
@@ -48,8 +49,6 @@ const corsHeaders = {
 };
 
 const DEFAULT_OPENAI_MODEL = "gpt-5.4-nano";
-const DEFAULT_SHADOW_MODEL = "local-shadow";
-
 const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -69,6 +68,14 @@ const toNumberOrNull = (value: unknown) => {
   }
 
   return value;
+};
+
+const normalizeModelName = (value: unknown) => {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim().slice(0, 120);
 };
 
 const parseModelResponse = (content: string): ModelResponse => {
@@ -238,22 +245,6 @@ const buildOpenAIPayload = (
   };
 };
 
-const buildShadowPayload = (
-  imageUrl: string,
-  previousMessages: Array<{ actor: string; payload: Record<string, unknown> }>,
-  action: "analyze" | "follow_up",
-  message: string,
-  round: number,
-  model: string,
-) => ({
-  image_url: imageUrl,
-  round,
-  action,
-  message,
-  previous_messages: previousMessages,
-  model,
-});
-
 const timeout = (ms: number) =>
   new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error(`Request timed out after ${ms}ms`)), ms);
@@ -277,87 +268,6 @@ const parseEnvFloat = (key: string, fallback: number): number => {
   }
 
   return value;
-};
-
-const callShadowInference = async ({
-  imageUrl,
-  previousMessages,
-  action,
-  message,
-  round,
-}: {
-  imageUrl: string;
-  previousMessages: Array<{ actor: string; payload: Record<string, unknown> }>;
-  action: "analyze" | "follow_up";
-  message: string;
-  round: number;
-}): Promise<InferenceResult | null> => {
-  const shadowUrl = Deno.env.get("SHADOW_INFERENCE_URL");
-  if (!shadowUrl) {
-    return null;
-  }
-
-  const shadowModel = Deno.env.get("SHADOW_MODEL_NAME") ?? DEFAULT_SHADOW_MODEL;
-  const timeoutMs = parseEnvFloat("SHADOW_INFERENCE_TIMEOUT_MS", 2500);
-
-  try {
-    const response = await fetchWithTimeout(
-      shadowUrl,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildShadowPayload(imageUrl, previousMessages, action, message, round, shadowModel)),
-      },
-      timeoutMs,
-    );
-
-    const text = await response.text();
-    if (!response.ok) {
-      return {
-        provider: "shadow",
-        path: "shadow_fallback_to_openai",
-        model: shadowModel,
-        parsed: {
-          candidates: [],
-          clarifying_questions: [],
-          overall_confidence: 0,
-          next_step: "review",
-          notes: `shadow service returned ${response.status}`,
-        },
-        notes: {
-          status: response.status,
-          body_excerpt: text.slice(0, 240),
-        },
-      };
-    }
-
-    const parsed = parseModelResponse(text);
-    return {
-      provider: "shadow",
-      path: "shadow",
-      model: shadowModel,
-      parsed,
-      notes: {
-        status: response.status,
-      },
-    };
-  } catch (error) {
-    return {
-      provider: "shadow",
-      path: "shadow_fallback_to_openai",
-      model: shadowModel,
-      parsed: {
-        candidates: [],
-        clarifying_questions: [],
-        overall_confidence: 0,
-        next_step: "review",
-        notes: error instanceof Error ? error.message : "shadow inference error",
-      },
-      notes: {
-        error: error instanceof Error ? error.message : "shadow inference error",
-      },
-    };
-  }
 };
 
 const callOpenAIInference = async ({
@@ -493,8 +403,6 @@ Deno.serve(async (req: Request) => {
   const serviceRole =
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_KEY");
   const openAiKey = Deno.env.get("OPENAI_API_KEY");
-  const shadowUrl = Deno.env.get("SHADOW_INFERENCE_URL");
-  const shadowConfidenceGate = parseEnvFloat("SHADOW_CONFIDENCE_GATE", 0.9);
 
   if (!supabaseUrl || !serviceRole) {
     return jsonResponse({ error: "missing_supabase_env" }, 500);
@@ -562,7 +470,12 @@ Deno.serve(async (req: Request) => {
     signedUrlObj = signedUrlData;
   }
 
-  const defaultModel = existingSession?.model ?? (Deno.env.get("OPENAI_MODEL") ?? DEFAULT_OPENAI_MODEL);
+  const requestedModel = normalizeModelName(body.model);
+  const defaultModel =
+    existingSession?.model ||
+    requestedModel ||
+    Deno.env.get("OPENAI_MODEL") ||
+    DEFAULT_OPENAI_MODEL;
   const currentRound = action === "analyze" ? 1 : (existingSession?.current_round ?? 0) + 1;
 
   const { data: historyMessages } = await supabase
@@ -576,48 +489,19 @@ Deno.serve(async (req: Request) => {
     payload: (row.payload ?? {}) as Record<string, unknown>,
   }));
 
-  let inference: InferenceResult;
-  const shadowResult =
-    action === "analyze" && !!shadowUrl ? await callShadowInference({
-      imageUrl: signedUrlObj!.signedUrl,
-      previousMessages: messageHistory,
-      action,
-      message: actionMessage,
-      round: currentRound,
-    }) : null;
-
-  if (shadowResult && shadowResult.path === "shadow" && shadowResult.parsed.overall_confidence >= shadowConfidenceGate) {
-    inference = shadowResult;
-  } else {
-    if (!openAiKey) {
-      return jsonResponse({ error: "missing_openai_key" }, 500);
-    }
-
-    inference = await callOpenAIInference({
-      imageUrl: signedUrlObj!.signedUrl,
-      previousMessages: messageHistory,
-      action,
-      message: actionMessage,
-      round: currentRound,
-      model: defaultModel,
-      openAiKey,
-    });
-
-    if (shadowResult) {
-      inference.path = "shadow_fallback_to_openai";
-      inference.provider = "openai";
-      inference.notes = {
-        ...inference.notes,
-        shadow_fallback: true,
-        shadow_path_reason:
-          shadowResult.path === "shadow"
-            ? shadowResult.parsed.overall_confidence < shadowConfidenceGate
-              ? "low_confidence"
-              : "shadow_error"
-            : "shadow_path_error",
-      };
-    }
+  if (!openAiKey) {
+    return jsonResponse({ error: "missing_openai_key" }, 500);
   }
+
+  const inference = await callOpenAIInference({
+    imageUrl: signedUrlObj!.signedUrl,
+    previousMessages: messageHistory,
+    action,
+    message: actionMessage,
+    round: currentRound,
+    model: defaultModel,
+    openAiKey,
+  });
 
   let sessionId = existingSession?.id;
 
@@ -724,7 +608,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: stateData } = await supabase
     .from("food_ai_sessions")
-    .select("id, state, overall_confidence, clarifying_questions, current_round")
+    .select("id, state, overall_confidence, clarifying_questions, current_round, model")
     .eq("id", sessionId)
     .maybeSingle();
 
@@ -741,8 +625,7 @@ Deno.serve(async (req: Request) => {
       ...inference.notes,
       entry_action: action,
       candidate_count: inference.parsed.candidates.length,
-      openai_model_requested: Deno.env.get("OPENAI_MODEL") ?? DEFAULT_OPENAI_MODEL,
-      fallback_from_shadow: inference.path === "shadow_fallback_to_openai",
+      openai_model_requested: defaultModel,
     },
   }).catch(() => {});
 

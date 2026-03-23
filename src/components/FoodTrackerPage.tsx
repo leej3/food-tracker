@@ -30,7 +30,10 @@ import {
   loadBootstrapData,
   loadFoodEntries,
 } from "../lib/backend";
-import { invokeFoodAnalyze } from "../lib/food-analyze";
+import {
+  DEFAULT_OPENAI_MODEL,
+  invokeFoodAnalyze,
+} from "../lib/food-analyze";
 import {
   buildEditedNutrientPayload,
   buildManualDraftPayload,
@@ -159,6 +162,8 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
   const [role, setRole] = useState<FoodAccessLevel>("logger");
   const [entryMode, setEntryMode] = useState<EntryMode>("manual");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoAnalyzeModel, setPhotoAnalyzeModel] =
+    useState(DEFAULT_OPENAI_MODEL);
   const [form, setForm] = useState<ManualFormState>(initialFormState);
   const [nutrientValues, setNutrientValues] = useState<Record<string, string>>(
     {},
@@ -484,11 +489,16 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     entryId: string,
     action: "analyze" | "follow_up",
     messageText: string,
+    modelOverride?: string,
   ) => {
+    const requestedModel = modelOverride?.trim() ?? "";
     const result = await invokeFoodAnalyze(session, {
       entryId,
       action,
       message: messageText,
+      ...(action === "analyze" && requestedModel
+        ? { model: requestedModel }
+        : {}),
     });
 
     const nextSession = result.session;
@@ -507,7 +517,10 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
           current_round: nextSession.current_round ?? 1,
           state:
             (nextSession.state as unknown as AiSession["state"]) ?? "candidate",
-          model: nextSession.model ?? result.inference_model ?? "gpt-5.4-nano",
+          model:
+            nextSession.model ??
+            result.inference_model ??
+            (requestedModel || DEFAULT_OPENAI_MODEL),
           overall_confidence: nextSession.overall_confidence,
           clarifying_questions: nextSession.clarifying_questions ?? [],
         },
@@ -588,7 +601,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     }
 
     try {
-      await callAiAnalyze(entryData.id, "analyze", "");
+      await callAiAnalyze(entryData.id, "analyze", "", photoAnalyzeModel);
       setReviewEntryId(entryData.id);
       setMessage("Photo uploaded. AI candidates generated.");
     } catch (analyzeError) {
@@ -947,6 +960,17 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
                   {photoFile ? photoFile.name : "No photo selected yet."}
                 </span>
               </div>
+              <label>
+                OpenAI model
+                <input
+                  value={photoAnalyzeModel}
+                  onChange={(event) => setPhotoAnalyzeModel(event.target.value)}
+                  placeholder={DEFAULT_OPENAI_MODEL}
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                />
+              </label>
               <p className="photo-help">{photoInputBehavior.helperText}</p>
             </div>
           ) : null}
@@ -1214,6 +1238,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
                 Overall confidence:{" "}
                 {Math.round((activeAi.session.overall_confidence ?? 0) * 100)}%
               </p>
+              <p>OpenAI model: {activeAi.session.model}</p>
               <ol className="candidate-list">
                 {activeAi.candidates.map((candidate) => (
                   <li

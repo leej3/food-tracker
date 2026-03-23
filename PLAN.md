@@ -42,9 +42,7 @@ The first release intentionally favors simplicity and a single deployed app:
 ### User clarifications integrated
 
 - "Self" person assignment on signup is automatic.
-- Shadow inference path is enabled by default for all new photo candidates:
-  - run local/shadow endpoint first,
-  - fall back to OpenAI above confidence floor when needed.
+- Browser-local shadow inference was dropped for this release because image-based inference on the target iPhone flow is not practical enough yet.
 - Edit-finalized-entry flow is included in this pass:
   - manual edits are captured in `food_entry_nutrients` as `edited`.
 - The real stack path is preferred for final validation while mocks are kept for fast offline iteration.
@@ -138,7 +136,7 @@ The first release intentionally favors simplicity and a single deployed app:
 - Run migrations in order.
 - Confirm production PostgREST schema contains food-tracker tables (`nutrient_definitions`, `user_roles`, `family_members`, ... ) before marking deployment as complete.
 - Seed bucket and any admin users for local development.
-- Ensure `/api/food-analyze` has runtime variables configured in Cloudflare Pages (`OPENAI_API_KEY`, `SUPABASE_URL`, optional `SHADOW_*`).
+- Ensure `/api/food-analyze` has runtime variables configured in Cloudflare Pages (`OPENAI_API_KEY`, `SUPABASE_URL`, optional `OPENAI_REQUEST_TIMEOUT_MS`).
 - Confirm app runs:
   - auth signup/login
   - member selection
@@ -153,7 +151,6 @@ The first release intentionally favors simplicity and a single deployed app:
 - Confirm offline queue:
   - submit manual entry while offline
   - come back online and sync.
-- Confirm shadow + OpenAI fallback telemetry in `food_ai_inference_events`.
 - Confirm CI quality gate:
   - `npm run lint`
   - `npm run typecheck`
@@ -240,6 +237,7 @@ The first release intentionally favors simplicity and a single deployed app:
 - 2026-03-23: Replaced browser-side `supabase.functions.invoke("food-analyze")` with a same-origin `/api/food-analyze` client path and added a Vite dev proxy fallback for local Supabase function use.
 - 2026-03-23: Added Cloudflare Pages Function `functions/api/food-analyze.ts` so `OPENAI_API_KEY` stays server-side in Cloudflare runtime secrets/bindings.
 - 2026-03-23: Reworked photo entry to a single camera-first `Add photo` action with mobile-aware helper copy and desktop file-picker fallback.
+- 2026-03-23: Added a per-analysis OpenAI model override in the UI (default `gpt-5.4-nano`) and removed the shadow inference rollout path for this release.
 - 2026-03-23: Verified local quality gates:
   - `npm run lint`
   - `npm run typecheck`

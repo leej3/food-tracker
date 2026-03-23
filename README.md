@@ -62,11 +62,7 @@ Required Cloudflare Pages runtime variables/secrets for `/api/food-analyze`:
 - `OPENAI_API_KEY` as a Pages secret
 - `SUPABASE_URL`
 - Optional runtime tuning:
-  - `OPENAI_MODEL`
-  - `SHADOW_INFERENCE_URL`
-  - `SHADOW_MODEL_NAME`
-  - `SHADOW_CONFIDENCE_GATE`
-  - `SHADOW_INFERENCE_TIMEOUT_MS`
+  - `OPENAI_MODEL` as the server-side default when the UI does not override it
   - `OPENAI_REQUEST_TIMEOUT_MS`
 
 Note: URLs that include a deployment hash (for example `https://<deployment-id>.food-tracker-7qq.pages.dev`) are immutable snapshots.
@@ -157,9 +153,9 @@ Coverage includes:
   - `VITE_SUPABASE_PUBLISHABLE_KEY`
 - Cloudflare Pages Function runtime:
   - `OPENAI_API_KEY` (secret)
-  - `OPENAI_MODEL` (default `gpt-5.4-nano`)
+  - `OPENAI_MODEL` (default `gpt-5.4-nano`, overridable per analysis in the UI)
   - `SUPABASE_URL`
-  - optional `SHADOW_*` variables
+  - optional `OPENAI_REQUEST_TIMEOUT_MS`
 
 Local Vite development keeps the browser on the same `/api/food-analyze` path and proxies that route to `${VITE_SUPABASE_URL}/functions/v1/food-analyze` when `VITE_SUPABASE_URL` is set. In production, the Pages Function reuses the authenticated user token and browser `apikey` header, so it does not require a separate Supabase service-role secret in Cloudflare.
 

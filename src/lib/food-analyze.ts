@@ -7,6 +7,7 @@ interface AnalyzeBody {
   entryId: string;
   action: AnalyzeAction;
   message?: string;
+  model?: string;
 }
 
 interface AnalyzeSessionResponse {
@@ -28,6 +29,7 @@ export interface FoodAnalyzeResponse {
 }
 
 const FOOD_ANALYZE_PATH = "/api/food-analyze";
+export const DEFAULT_OPENAI_MODEL = "gpt-5.4-nano";
 const supabasePublishableKey =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
   import.meta.env.VITE_SUPABASE_ANON_KEY;
