@@ -14,7 +14,7 @@ Standalone React + Supabase app for logging nutrition by family member with:
 
 - Vite + React + TypeScript
 - Supabase Auth / Postgres / Storage
-- Supabase Edge Functions + OpenAI Chat Completions API
+- Cloudflare Pages Functions + OpenAI Chat Completions API
 - Recharts
 
 ## Quick start
@@ -43,8 +43,8 @@ The production deploy flow follows the `consistency-tracker` pattern:
 - GitHub Action `.github/workflows/deploy.yml` deploys to Cloudflare Pages on pushes to `main`.
 - CI now runs lint, typecheck, Vitest coverage, and mocked Playwright before deploy.
 - The deploy workflow bootstraps the Food Tracker Supabase schema before Cloudflare publish.
-- Build uses `npm run build` with production environment variables injected from repository secrets.
-- Deploy is executed with `wrangler pages deploy` using the `food-tracker` project.
+- Build uses `npm run build`, which now also compiles the Pages Function bundle via `wrangler pages functions build`.
+- Deploy is executed with `wrangler pages deploy` using the checked-in `wrangler.toml` configuration and `food-tracker` project.
 
 Required repository secrets for GitHub Actions:
 
@@ -56,6 +56,18 @@ Required repository secrets for GitHub Actions:
   - `apply_if_missing` (default): verify schema, and rebuild it only if required tables are missing.
   - `reset_and_reseed`: always drop Food Tracker-managed objects and reapply migrations before deploy.
   - `check`: verify only and fail deploy if schema is missing.
+
+Required Cloudflare Pages runtime variables/secrets for `/api/food-analyze`:
+
+- `OPENAI_API_KEY` as a Pages secret
+- `SUPABASE_URL`
+- Optional runtime tuning:
+  - `OPENAI_MODEL`
+  - `SHADOW_INFERENCE_URL`
+  - `SHADOW_MODEL_NAME`
+  - `SHADOW_CONFIDENCE_GATE`
+  - `SHADOW_INFERENCE_TIMEOUT_MS`
+  - `OPENAI_REQUEST_TIMEOUT_MS`
 
 Note: URLs that include a deployment hash (for example `https://<deployment-id>.food-tracker-7qq.pages.dev`) are immutable snapshots.
 If signup/login fails on one of those URLs, open the main project URL above for the latest build.
@@ -131,22 +143,25 @@ npm run ci
 Coverage includes:
 
 - unit tests for fuzzy search, queue persistence, and entry payload validation
+- unit tests for camera-preference detection
 - integration tests for bootstrap/schema handling and `FoodTrackerPage`
 - Playwright regression tests for:
   - manual sign-in + entry flow
   - schema-missing bootstrap message
-  - photo analyze/apply/follow-up/finalize flow
+  - photo add/analyze/apply/follow-up/finalize flow
 
 ## Environment variables
 
 - Front-end:
   - `VITE_SUPABASE_URL`
   - `VITE_SUPABASE_PUBLISHABLE_KEY`
-- Function runtime:
-  - `OPENAI_API_KEY`
+- Cloudflare Pages Function runtime:
+  - `OPENAI_API_KEY` (secret)
   - `OPENAI_MODEL` (default `gpt-5.4-nano`)
   - `SUPABASE_URL`
-  - `SUPABASE_SERVICE_ROLE_KEY`
+  - optional `SHADOW_*` variables
+
+Local Vite development keeps the browser on the same `/api/food-analyze` path and proxies that route to `${VITE_SUPABASE_URL}/functions/v1/food-analyze` when `VITE_SUPABASE_URL` is set. In production, the Pages Function reuses the authenticated user token and browser `apikey` header, so it does not require a separate Supabase service-role secret in Cloudflare.
 
 ## Data model
 
@@ -179,15 +194,16 @@ Coverage includes:
 2. User selects a tracked person.
 3. Create either:
    - Manual entry with optional per-nutrient values, or
-   - Photo entry (captured from iPhone via `capture="environment"`).
-4. Photo entry is uploaded to storage and sent to `food-analyze` function.
-5. Function stores candidates + clarifying questions.
+   - Photo entry through one `Add photo` action that prefers direct camera capture on supported phones.
+4. Photo entry is uploaded to storage and sent to the same-origin `/api/food-analyze` Pages Function.
+5. The Pages Function stores candidates + clarifying questions in Supabase.
 6. User confirms a candidate, can send follow-up prompts, then finalizes entry.
 7. Manual entries are stored with `manual` source values.
 8. Optional offline queue automatically saves manual entries when offline.
 
 ## Notes
 
-- iPhone capture is optimized for phone upload (`accept="image/*"` + `capture="environment"`).
+- iPhone capture is optimized through a single `Add photo` control that applies `capture="environment"` only on supported mobile browsers.
+- Production photo analysis now runs server-side in Cloudflare Pages Functions. The browser only sends the authenticated request and never receives `OPENAI_API_KEY`.
 - Timestamp precision is minute-level in UTC.
 - Retention is indefinite by schema defaults.

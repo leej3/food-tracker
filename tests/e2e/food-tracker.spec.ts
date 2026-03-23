@@ -1,11 +1,13 @@
 import { Buffer } from "node:buffer";
 import { expect, test, type Page } from "@playwright/test";
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? "https://test.supabase.co";
+const SUPABASE_URL =
+  process.env.VITE_SUPABASE_URL ?? "https://test.supabase.co";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
 const REAL_STACK = process.env.PLAYWRIGHT_REAL_STACK === "1";
 const REAL_EMAIL = process.env.PLAYWRIGHT_REAL_EMAIL ?? "pw-food@local.dev";
-const REAL_PASSWORD = process.env.PLAYWRIGHT_REAL_PASSWORD ?? "localdevpassword123";
+const REAL_PASSWORD =
+  process.env.PLAYWRIGHT_REAL_PASSWORD ?? "localdevpassword123";
 
 const testUser = {
   id: "user-admin-1",
@@ -91,7 +93,12 @@ const mountSupabaseMocks = async (
       confidence: number;
       rationale: string;
       payload: {
-        nutrients: Array<{ code: string; amount: number; unit: string; confidence?: number }>;
+        nutrients: Array<{
+          code: string;
+          amount: number;
+          unit: string;
+          confidence?: number;
+        }>;
       };
       is_selected: boolean;
     }>,
@@ -104,6 +111,95 @@ const mountSupabaseMocks = async (
     const request = route.request();
     const requestUrl = request.url();
     const url = new URL(requestUrl);
+    const path = url.pathname;
+    const method = request.method();
+
+    if (method === "POST" && path === "/api/food-analyze") {
+      const payload = ((await request.postDataJSON()) ?? {}) as {
+        entryId?: string;
+        action?: "analyze" | "follow_up";
+      };
+      const entryId = payload.entryId ?? state.entries[0]?.id ?? "entry-1";
+      const action = payload.action ?? "analyze";
+      const entry = state.entries.find((candidate) => candidate.id === entryId);
+
+      if (action === "analyze") {
+        sessionCounter += 1;
+        const sessionId = `session-${sessionCounter}`;
+        state.aiSessions = [
+          {
+            id: sessionId,
+            entry_id: entryId,
+            current_round: 1,
+            state: "ready_for_review",
+            model: "gpt-5.4-nano",
+            overall_confidence: 0.82,
+            clarifying_questions: ["Was this canned or homemade?"],
+          },
+        ];
+        state.aiCandidates = [
+          {
+            id: "candidate-1",
+            session_id: sessionId,
+            position: 1,
+            item_name: "Tomato soup",
+            serving_qty: 12,
+            serving_unit: "oz",
+            confidence: 0.82,
+            rationale: "Typical tomato soup serving from the photo.",
+            payload: {
+              nutrients: [
+                {
+                  code: "calories",
+                  amount: 180,
+                  unit: "kcal",
+                  confidence: 0.82,
+                },
+                { code: "protein_g", amount: 4, unit: "g", confidence: 0.71 },
+              ],
+            },
+            is_selected: false,
+          },
+        ];
+      } else if (state.aiSessions[0]) {
+        state.aiSessions[0] = {
+          ...state.aiSessions[0],
+          current_round: 2,
+          clarifying_questions: [],
+          overall_confidence: 0.91,
+        };
+        state.aiCandidates = state.aiCandidates.map((candidate) => ({
+          ...candidate,
+          item_name: "Tomato soup (12 oz can)",
+          confidence: 0.91,
+          rationale: "Updated with the follow-up serving detail.",
+        }));
+      }
+
+      if (entry) {
+        entry.workflow_state = "review_needed";
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        json: {
+          session: state.aiSessions[0]
+            ? {
+                id: state.aiSessions[0].id,
+                current_round: state.aiSessions[0].current_round,
+                state: state.aiSessions[0].state,
+                overall_confidence: state.aiSessions[0].overall_confidence,
+                clarifying_questions: state.aiSessions[0].clarifying_questions,
+                model: state.aiSessions[0].model,
+              }
+            : null,
+          candidates: state.aiCandidates,
+          inference_model: "gpt-5.4-nano",
+        },
+      });
+      return;
+    }
 
     if (!requestUrl.startsWith(SUPABASE_URL)) {
       await route.continue();
@@ -114,10 +210,6 @@ const mountSupabaseMocks = async (
       await route.fulfill({ status: 204 });
       return;
     }
-
-    const path = url.pathname;
-    const method = request.method();
-
     const maybeSchemaMiss = async (table: string) => {
       if (!schemaMissing.has(table)) {
         return false;
@@ -222,34 +314,47 @@ const mountSupabaseMocks = async (
     }
 
     if (method === "POST" && path === "/rest/v1/food_entries") {
-      const payload = ((await request.postDataJSON()) ?? {}) as Record<string, string | number | null>;
+      const payload = ((await request.postDataJSON()) ?? {}) as Record<
+        string,
+        string | number | null
+      >;
       entryCounter += 1;
       const entryId = `entry-${entryCounter}`;
       const nextEntry = {
         id: entryId,
-        member_id: String(payload.member_id ?? state.members[0]?.id ?? "member-adam"),
+        member_id: String(
+          payload.member_id ?? state.members[0]?.id ?? "member-adam",
+        ),
         logged_by_user_id: testUser.id,
-        photo_storage_path: typeof payload.photo_storage_path === "string" ? payload.photo_storage_path : null,
+        photo_storage_path:
+          typeof payload.photo_storage_path === "string"
+            ? payload.photo_storage_path
+            : null,
         consumed_at:
           typeof payload.consumed_at === "string"
             ? payload.consumed_at
             : formatIsoMinute("2026-03-22T07:00"),
-        item_name: typeof payload.item_name === "string" ? payload.item_name : "Manual entry",
-        meal_type: (typeof payload.meal_type === "string" ? payload.meal_type : "snack") as
-          | "breakfast"
-          | "lunch"
-          | "dinner"
-          | "snack"
-          | "other",
+        item_name:
+          typeof payload.item_name === "string"
+            ? payload.item_name
+            : "Manual entry",
+        meal_type: (typeof payload.meal_type === "string"
+          ? payload.meal_type
+          : "snack") as "breakfast" | "lunch" | "dinner" | "snack" | "other",
         serving_qty: Number(payload.serving_qty ?? 1),
-        serving_unit: typeof payload.serving_unit === "string" ? payload.serving_unit : "oz",
-        workflow_state: (payload.photo_storage_path ? "analysis_pending" : "finalized") as
-          | "analysis_pending"
-          | "review_needed"
-          | "finalized",
+        serving_unit:
+          typeof payload.serving_unit === "string"
+            ? payload.serving_unit
+            : "oz",
+        workflow_state: (payload.photo_storage_path
+          ? "analysis_pending"
+          : "finalized") as "analysis_pending" | "review_needed" | "finalized",
         source_confidence: payload.photo_storage_path ? null : 0.92,
         source_label: payload.photo_storage_path ? "photo" : "manual",
-        manual_notes: typeof payload.manual_notes === "string" ? payload.manual_notes : null,
+        manual_notes:
+          typeof payload.manual_notes === "string"
+            ? payload.manual_notes
+            : null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         food_entry_nutrients: [],
@@ -272,7 +377,9 @@ const mountSupabaseMocks = async (
         unit: string;
       }>;
       for (const row of payload ?? []) {
-        const entry = state.entries.find((candidate) => candidate.id === row.entry_id);
+        const entry = state.entries.find(
+          (candidate) => candidate.id === row.entry_id,
+        );
         if (!entry) {
           continue;
         }
@@ -311,7 +418,10 @@ const mountSupabaseMocks = async (
       return;
     }
 
-    if (method === "POST" && path.startsWith("/storage/v1/object/food-photos")) {
+    if (
+      method === "POST" &&
+      path.startsWith("/storage/v1/object/food-photos")
+    ) {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -320,92 +430,17 @@ const mountSupabaseMocks = async (
       return;
     }
 
-    if (method === "POST" && path === "/functions/v1/food-analyze") {
-      const payload = ((await request.postDataJSON()) ?? {}) as {
-        entryId?: string;
-        action?: "analyze" | "follow_up";
-      };
-      const entryId = payload.entryId ?? state.entries[0]?.id ?? "entry-1";
-      const action = payload.action ?? "analyze";
-      const entry = state.entries.find((candidate) => candidate.id === entryId);
-
-      if (action === "analyze") {
-        sessionCounter += 1;
-        const sessionId = `session-${sessionCounter}`;
-        state.aiSessions = [
-          {
-            id: sessionId,
-            entry_id: entryId,
-            current_round: 1,
-            state: "ready_for_review",
-            model: "gpt-5.4-nano",
-            overall_confidence: 0.82,
-            clarifying_questions: ["Was this canned or homemade?"],
-          },
-        ];
-        state.aiCandidates = [
-          {
-            id: "candidate-1",
-            session_id: sessionId,
-            position: 1,
-            item_name: "Tomato soup",
-            serving_qty: 12,
-            serving_unit: "oz",
-            confidence: 0.82,
-            rationale: "Typical tomato soup serving from the photo.",
-            payload: {
-              nutrients: [
-                { code: "calories", amount: 180, unit: "kcal", confidence: 0.82 },
-                { code: "protein_g", amount: 4, unit: "g", confidence: 0.71 },
-              ],
-            },
-            is_selected: false,
-          },
-        ];
-      } else if (state.aiSessions[0]) {
-        state.aiSessions[0] = {
-          ...state.aiSessions[0],
-          current_round: 2,
-          clarifying_questions: [],
-          overall_confidence: 0.91,
-        };
-        state.aiCandidates = state.aiCandidates.map((candidate) => ({
-          ...candidate,
-          item_name: "Tomato soup (12 oz can)",
-          confidence: 0.91,
-          rationale: "Updated with the follow-up serving detail.",
-        }));
-      }
-
-      if (entry) {
-        entry.workflow_state = "review_needed";
-      }
-
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        json: {
-          session: state.aiSessions[0]
-            ? {
-                id: state.aiSessions[0].id,
-                current_round: state.aiSessions[0].current_round,
-                state: state.aiSessions[0].state,
-                overall_confidence: state.aiSessions[0].overall_confidence,
-                clarifying_questions: state.aiSessions[0].clarifying_questions,
-              }
-            : null,
-          candidates: state.aiCandidates,
-        },
-      });
-      return;
-    }
-
-    if (method === "POST" && path === "/rest/v1/rpc/apply_food_entry_ai_candidate") {
+    if (
+      method === "POST" &&
+      path === "/rest/v1/rpc/apply_food_entry_ai_candidate"
+    ) {
       const payload = ((await request.postDataJSON()) ?? {}) as {
         p_entry_id?: string;
         p_candidate_id?: string;
       };
-      const candidate = state.aiCandidates.find((row) => row.id === payload.p_candidate_id);
+      const candidate = state.aiCandidates.find(
+        (row) => row.id === payload.p_candidate_id,
+      );
       const entry = state.entries.find((row) => row.id === payload.p_entry_id);
 
       if (candidate && entry) {
@@ -414,13 +449,15 @@ const mountSupabaseMocks = async (
         entry.serving_unit = candidate.serving_unit;
         entry.source_confidence = candidate.confidence;
         entry.workflow_state = "review_needed";
-        entry.food_entry_nutrients = candidate.payload.nutrients.map((nutrient) => ({
-          nutrient_code: nutrient.code,
-          amount: nutrient.amount,
-          unit: nutrient.unit,
-          source: "guessed",
-          source_confidence: nutrient.confidence ?? candidate.confidence,
-        }));
+        entry.food_entry_nutrients = candidate.payload.nutrients.map(
+          (nutrient) => ({
+            nutrient_code: nutrient.code,
+            amount: nutrient.amount,
+            unit: nutrient.unit,
+            source: "guessed",
+            source_confidence: nutrient.confidence ?? candidate.confidence,
+          }),
+        );
         state.aiCandidates = state.aiCandidates.map((row) => ({
           ...row,
           is_selected: row.id === candidate.id,
@@ -436,7 +473,9 @@ const mountSupabaseMocks = async (
     }
 
     if (method === "POST" && path === "/rest/v1/rpc/finalize_food_entry") {
-      const payload = ((await request.postDataJSON()) ?? {}) as { p_entry_id?: string };
+      const payload = ((await request.postDataJSON()) ?? {}) as {
+        p_entry_id?: string;
+      };
       const entry = state.entries.find((row) => row.id === payload.p_entry_id);
       if (entry) {
         entry.workflow_state = "finalized";
@@ -463,7 +502,9 @@ const signInThroughUi = async (page: Page) => {
 
 const ensureRealTestUser = async (email: string, password: string) => {
   if (!SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error("SUPABASE_SERVICE_ROLE_KEY is required for real stack Playwright run.");
+    throw new Error(
+      "SUPABASE_SERVICE_ROLE_KEY is required for real stack Playwright run.",
+    );
   }
 
   const response = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
@@ -485,7 +526,9 @@ const ensureRealTestUser = async (email: string, password: string) => {
   }
 
   const body = await response.text();
-  throw new Error(`Unable to create local test user: ${response.status} ${body}`);
+  throw new Error(
+    `Unable to create local test user: ${response.status} ${body}`,
+  );
 };
 
 test("manual sign-in and entry flow", async ({ page }) => {
@@ -495,7 +538,9 @@ test("manual sign-in and entry flow", async ({ page }) => {
   await signInThroughUi(page);
 
   await expect(page.getByText("Tracking for")).toBeVisible();
-  await page.getByPlaceholder("Apple, toast, chicken breast...").fill("Greek yogurt");
+  await page
+    .getByPlaceholder("Apple, toast, chicken breast...")
+    .fill("Greek yogurt");
   await page.getByRole("spinbutton", { name: "Serving" }).fill("5");
   await page.getByRole("button", { name: "Save entry" }).click();
 
@@ -503,7 +548,9 @@ test("manual sign-in and entry flow", async ({ page }) => {
   await expect(page.getByRole("cell", { name: "Greek yogurt" })).toBeVisible();
 });
 
-test("schema-missing errors are shown as actionable bootstrap guidance", async ({ page }) => {
+test("schema-missing errors are shown as actionable bootstrap guidance", async ({
+  page,
+}) => {
   test.skip(REAL_STACK, "Real-stack mode uses the hosted smoke test.");
 
   await mountSupabaseMocks(page, {
@@ -514,35 +561,48 @@ test("schema-missing errors are shown as actionable bootstrap guidance", async (
   await expect(page.getByText(/backend is not initialized/i)).toBeVisible();
 });
 
-test("photo review flow supports analyze, apply, follow-up, and finalize", async ({ page }) => {
+test("photo review flow supports analyze, apply, follow-up, and finalize", async ({
+  page,
+}) => {
   test.skip(REAL_STACK, "Real-stack mode uses the hosted smoke test.");
 
   await mountSupabaseMocks(page);
   await signInThroughUi(page);
 
   await page.getByRole("button", { name: "Photo" }).click();
-  await page.getByPlaceholder("Apple, toast, chicken breast...").fill("Lunch photo");
-  await page.locator('input[type="file"]').setInputFiles({
+  await expect(page.getByRole("button", { name: "Add photo" })).toBeVisible();
+  await page
+    .getByPlaceholder("Apple, toast, chicken breast...")
+    .fill("Lunch photo");
+  await page.locator('input[data-testid="photo-input"]').setInputFiles({
     name: "meal.jpg",
     mimeType: "image/jpeg",
     buffer: Buffer.from("fake-image"),
   });
   await page.getByRole("button", { name: "Upload + analyze" }).click();
 
-  await expect(page.getByText("Photo uploaded. AI candidates generated.")).toBeVisible();
-  await expect(page.locator("strong").filter({ hasText: "Tomato soup" })).toBeVisible();
+  await expect(
+    page.getByText("Photo uploaded. AI candidates generated."),
+  ).toBeVisible();
+  await expect(
+    page.locator("strong").filter({ hasText: "Tomato soup" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Apply this candidate" }).click();
   await expect(page.getByText(/Candidate applied/i)).toBeVisible();
 
   await page.getByLabel(/Ask a follow-up/i).fill("It was a 12 oz can.");
   await page.getByRole("button", { name: "Send follow-up" }).click();
-  await expect(page.locator("strong").filter({ hasText: "Tomato soup (12 oz can)" })).toBeVisible();
+  await expect(
+    page.locator("strong").filter({ hasText: "Tomato soup (12 oz can)" }),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Finalize" }).click();
   await expect(page.getByText("Entry finalized.")).toBeVisible();
 });
 
-test("hosted smoke login works when real-stack mode is enabled", async ({ page }) => {
+test("hosted smoke login works when real-stack mode is enabled", async ({
+  page,
+}) => {
   test.skip(!REAL_STACK, "Mock mode covers local regression tests.");
 
   await ensureRealTestUser(REAL_EMAIL, REAL_PASSWORD);

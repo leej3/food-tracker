@@ -1,6 +1,7 @@
 .env.local
 node_modules
 /dist
+.wrangler/
 supabase/.temp
 
 /test-results/

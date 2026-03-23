@@ -118,9 +118,9 @@ The first release intentionally favors simplicity and a single deployed app:
 - CSV export and advanced trend analysis options.
 - Per-nutrient confidence threshold policy controls in dashboards.
 
-## 5) Edge function plan
+## 5) Server-side analysis plan
 
-- `supabase/functions/food-analyze/index.ts`
+- `functions/api/food-analyze.ts`
 - Responsibilities:
   - verify auth + member access.
   - download signed image URL.
@@ -130,13 +130,15 @@ The first release intentionally favors simplicity and a single deployed app:
 - Existing hardening changes completed:
   - OpenAI key and photo path checks.
   - candidate/session cleanup for re-runs.
+  - same-origin browser call path via `src/lib/food-analyze.ts`.
+  - local Vite proxy fallback to `supabase/functions/v1/food-analyze` for non-Pages local development.
 
 ## 6) Deployment/validation checklist
 
 - Run migrations in order.
 - Confirm production PostgREST schema contains food-tracker tables (`nutrient_definitions`, `user_roles`, `family_members`, ... ) before marking deployment as complete.
 - Seed bucket and any admin users for local development.
-- Ensure `food-analyze` has environment variables in Supabase secrets.
+- Ensure `/api/food-analyze` has runtime variables configured in Cloudflare Pages (`OPENAI_API_KEY`, `SUPABASE_URL`, optional `SHADOW_*`).
 - Confirm app runs:
   - auth signup/login
   - member selection
@@ -165,11 +167,14 @@ The first release intentionally favors simplicity and a single deployed app:
   - deploy is blocked unless backend schema check passes.
   - deploy bootstrap runs `npm run supabase:schema:bootstrap` before build/publish.
   - project name set to `food-tracker` and deploy command matches consistency-tracker style.
-  - `wrangler.toml` exists with `pages_build_output_dir = "dist"`.
+  - `wrangler.toml` exists with `pages_build_output_dir = "dist"` and `compatibility_flags = ["nodejs_compat"]`.
+  - build compiles Pages Functions successfully via `npm run pages:functions:build`.
   - local `npm run deploy:cloudflare` remains for one-off deploys.
   - production variables are configured in Cloudflare Pages:
     - `VITE_SUPABASE_URL`
-    - `VITE_SUPABASE_PUBLISHABLE_KEY`.
+    - `VITE_SUPABASE_PUBLISHABLE_KEY`
+    - `SUPABASE_URL`
+    - `OPENAI_API_KEY`.
   - backend deployment variables are configured in GitHub:
     - `SUPABASE_DB_URL`
     - optional `FOOD_TRACKER_DB_BOOTSTRAP`.
@@ -181,7 +186,7 @@ The first release intentionally favors simplicity and a single deployed app:
   - `Could not find the table 'public.nutrient_definitions'`
   - `Could not find the table 'public.user_roles'`
   - `Could not find the table 'public.family_members'`
-  means the Pages deployment is pointed at an existing Supabase project that has only the consistency-tracker schema (`people`, `consistency_entries`).
+    means the Pages deployment is pointed at an existing Supabase project that has only the consistency-tracker schema (`people`, `consistency_entries`).
 - `food-tracker-7qq.pages.dev` is otherwise healthy; this is a backend schema mismatch.
 - This is now addressed in-repo by deploy bootstrap:
   - `scripts/bootstrap-supabase-schema.mjs`
@@ -232,6 +237,15 @@ The first release intentionally favors simplicity and a single deployed app:
 - 2026-03-23: Switched runtime and CI configuration to prefer `VITE_SUPABASE_PUBLISHABLE_KEY` with legacy env fallback during rotation.
 - 2026-03-23: Hardened schema bootstrap to retry public probe checks and emit actionable failure output when `SUPABASE_DB_URL` is not configured.
 - 2026-03-23: Migrated both `food-tracker` and `consistency-tracker` to publishable keys and disabled legacy Supabase JWT API keys for the shared project.
+- 2026-03-23: Replaced browser-side `supabase.functions.invoke("food-analyze")` with a same-origin `/api/food-analyze` client path and added a Vite dev proxy fallback for local Supabase function use.
+- 2026-03-23: Added Cloudflare Pages Function `functions/api/food-analyze.ts` so `OPENAI_API_KEY` stays server-side in Cloudflare runtime secrets/bindings.
+- 2026-03-23: Reworked photo entry to a single camera-first `Add photo` action with mobile-aware helper copy and desktop file-picker fallback.
+- 2026-03-23: Verified local quality gates:
+  - `npm run lint`
+  - `npm run typecheck`
+  - `npm run test:coverage`
+  - `npm run test:e2e`
+  - `npm run build`
 
 ## 9) Next execution plan: production photo-analysis smoke test + camera-first capture
 
@@ -243,16 +257,16 @@ The first release intentionally favors simplicity and a single deployed app:
 
 ### Product requirements
 
-- Primary mobile action should be "Take photo".
-- On supported mobile browsers, especially iPhone Safari, that action should open the camera directly.
-- Secondary action can be "Upload existing photo" for library/file selection.
+- Primary mobile action should be one `Add photo` control that opens the camera directly on supported phones.
+- On supported mobile browsers, especially iPhone Safari, that control should prefer the rear camera.
+- The same control should still allow existing-photo selection when the browser/device falls back to a chooser.
 - Desktop should continue to support file upload without regression.
 - The same capture flow should feed the existing Supabase Storage + analysis pipeline.
 - Production analysis must authenticate to OpenAI using `OPENAI_API_KEY` in the deployed Cloudflare function environment.
 - The browser must never receive `OPENAI_API_KEY`; it should only call the hosted analysis function with the authenticated user session.
 - Photo entry should use one `Add photo` action that prefers direct camera capture on supported phones and falls back to normal file selection elsewhere.
 
-### Clarifications needed before implementation
+### Resolved implementation decisions
 
 - Decision: move OpenAI calls to a Cloudflare server-side boundary and keep `OPENAI_API_KEY` only in Cloudflare secrets/runtime bindings.
 - Decision: use one unified `Add photo` action that prefers camera on supported phones.
@@ -264,8 +278,8 @@ The first release intentionally favors simplicity and a single deployed app:
   - desktop / unsupported path falls back to standard file selection
 - Keep camera capture and library/file selection behind shared upload + analysis handlers so the storage/inference path remains identical after file selection.
 - Add capability-aware UI copy:
--  - single `Add photo` call to action
--  - helper copy that makes camera preference clear on mobile without splitting the workflow into separate buttons
+  - single `Add photo` call to action
+  - helper copy that makes camera preference clear on mobile without splitting the workflow into separate buttons
 - Preserve resumable AI session behavior after either capture source.
 - Replace Supabase-hosted OpenAI analysis calls with a Cloudflare server-side endpoint that:
   - receives the authenticated browser request
@@ -276,14 +290,20 @@ The first release intentionally favors simplicity and a single deployed app:
 
 ### Verification plan
 
-- Manual production smoke test on iPhone:
+- Local verification completed on 2026-03-23:
+  - `npm run lint` passed
+  - `npm run typecheck` passed
+  - `npm run test:coverage` passed
+  - `npm run test:e2e` passed
+  - `npm run build` passed, including `npm run pages:functions:build`
+- Remaining manual production smoke test on iPhone:
   - sign in
-  - tap "Take photo"
+  - tap `Add photo`
   - confirm camera opens rather than file picker
   - capture nutrition label or food image
   - confirm upload, AI candidate generation, candidate apply, and finalize flow
 - Desktop/browser smoke test:
-  - confirm "Upload existing photo" still works
+  - confirm `Add photo` still opens normal file selection
   - confirm no regression in manual entry flow
 - Production console/network verification:
   - no blocked mixed-content or invalid-key errors
@@ -291,9 +311,12 @@ The first release intentionally favors simplicity and a single deployed app:
   - storage upload succeeds
 - Secrets verification:
   - Cloudflare deployed environment includes `OPENAI_API_KEY`
+- Current blocker for final production smoke result:
+  - requires a live deployed Pages project with runtime secrets configured plus manual iPhone execution, which was not available inside this workspace-only pass.
 
 ### Deliverables
 
 - camera-first production UX in the app
 - OpenAI calls kept server-side in Cloudflare with `OPENAI_API_KEY` only in Cloudflare secrets
-- recorded smoke-test results in this plan document after completion
+- local verification results recorded in this plan document
+- production iPhone smoke-test result still pending live environment access

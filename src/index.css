@@ -249,7 +249,37 @@ button.active {
 }
 
 .photo-control {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.photo-picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
   align-items: center;
+}
+
+.photo-file-name,
+.photo-help {
+  color: var(--muted);
+}
+
+.photo-help {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .link-button {

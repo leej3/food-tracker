@@ -1,4 +1,12 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+} from "react";
 import type { Session } from "@supabase/supabase-js";
 import {
   AVAILABLE_METRICS,
@@ -22,6 +30,7 @@ import {
   loadBootstrapData,
   loadFoodEntries,
 } from "../lib/backend";
+import { invokeFoodAnalyze } from "../lib/food-analyze";
 import {
   buildEditedNutrientPayload,
   buildManualDraftPayload,
@@ -36,6 +45,7 @@ import {
   getQueuedManualEntries,
   removeQueuedEntry,
 } from "../lib/queue";
+import { getPhotoInputBehavior } from "../lib/photo-input";
 import { OfflineBanner } from "./OfflineBanner";
 import { TrendChart } from "./TrendChart";
 import { AdminPanel } from "./AdminPanel";
@@ -97,8 +107,13 @@ const METRIC_NAMES: Record<NutrientCode, string> = {
   alcohol_g: "Alcohol (g)",
 };
 
-const getNutrientAmount = (entry: FoodEntryWithNutrients, code: NutrientCode): number => {
-  const row = entry.food_entry_nutrients.find((nutrient) => nutrient.nutrient_code === code);
+const getNutrientAmount = (
+  entry: FoodEntryWithNutrients,
+  code: NutrientCode,
+): number => {
+  const row = entry.food_entry_nutrients.find(
+    (nutrient) => nutrient.nutrient_code === code,
+  );
   return row ? row.amount : 0;
 };
 
@@ -106,11 +121,16 @@ const buildEditDraftFromEntry = (
   entry: FoodEntryWithNutrients,
   nutrientDefinitions: NutrientDefinition[],
 ): EditEntryFormState => {
-  const nutrients = nutrientDefinitions.reduce<Record<string, string>>((acc, nutrient) => {
-    const found = entry.food_entry_nutrients.find((row) => row.nutrient_code === nutrient.code);
-    acc[nutrient.code] = found ? String(found.amount) : "";
-    return acc;
-  }, {});
+  const nutrients = nutrientDefinitions.reduce<Record<string, string>>(
+    (acc, nutrient) => {
+      const found = entry.food_entry_nutrients.find(
+        (row) => row.nutrient_code === nutrient.code,
+      );
+      acc[nutrient.code] = found ? String(found.amount) : "";
+      return acc;
+    },
+    {},
+  );
 
   return {
     entryId: entry.id,
@@ -129,7 +149,9 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const [entries, setEntries] = useState<FoodEntryWithNutrients[]>([]);
-  const [nutrientDefinitions, setNutrientDefinitions] = useState<NutrientDefinition[]>([]);
+  const [nutrientDefinitions, setNutrientDefinitions] = useState<
+    NutrientDefinition[]
+  >([]);
   const [historyItemNames, setHistoryItemNames] = useState<string[]>([]);
   const [queued, setQueued] = useState<QueuedManualEntry[]>([]);
   const [online, setOnline] = useState(() => navigator.onLine);
@@ -138,8 +160,11 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
   const [entryMode, setEntryMode] = useState<EntryMode>("manual");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [form, setForm] = useState<ManualFormState>(initialFormState);
-  const [nutrientValues, setNutrientValues] = useState<Record<string, string>>({});
-  const [selectedMetric, setSelectedMetric] = useState<NutrientCode>("calories");
+  const [nutrientValues, setNutrientValues] = useState<Record<string, string>>(
+    {},
+  );
+  const [selectedMetric, setSelectedMetric] =
+    useState<NutrientCode>("calories");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -148,10 +173,33 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
   const [editDraft, setEditDraft] = useState<EditEntryFormState | null>(null);
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [aiByEntry, setAiByEntry] = useState<Record<string, AiFlowState>>({});
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
 
-  const nutrientMap = useMemo(() => buildNutrientMap(nutrientDefinitions), [nutrientDefinitions]);
-  const historySuggestions = buildHistorySuggestions(form.itemName, historyItemNames);
+  const nutrientMap = useMemo(
+    () => buildNutrientMap(nutrientDefinitions),
+    [nutrientDefinitions],
+  );
+  const historySuggestions = buildHistorySuggestions(
+    form.itemName,
+    historyItemNames,
+  );
   const isAdmin = role === "admin";
+  const photoInputBehavior = useMemo(
+    () =>
+      getPhotoInputBehavior({
+        userAgent: typeof navigator === "undefined" ? "" : navigator.userAgent,
+        hasCaptureSupport:
+          typeof document === "undefined"
+            ? false
+            : "capture" in document.createElement("input"),
+        hasCoarsePointer:
+          typeof window === "undefined" ||
+          typeof window.matchMedia !== "function"
+            ? false
+            : window.matchMedia("(pointer: coarse)").matches,
+      }),
+    [],
+  );
 
   useEffect(() => {
     const onLine = () => setOnline(true);
@@ -166,7 +214,9 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
         const bootstrap = await loadBootstrapData(supabase, session.user.id);
         setRole(bootstrap.role);
         setNutrientDefinitions(bootstrap.nutrients);
-        setNutrientValues(buildEmptyValueMap(bootstrap.nutrients.map((row) => row.code)));
+        setNutrientValues(
+          buildEmptyValueMap(bootstrap.nutrients.map((row) => row.code)),
+        );
         setMembers(bootstrap.members);
         if (!selectedMemberId && bootstrap.members.length > 0) {
           setSelectedMemberId(bootstrap.members[0].id);
@@ -187,6 +237,9 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
   useEffect(() => {
     if (entryMode === "manual") {
       setPhotoFile(null);
+      if (photoInputRef.current) {
+        photoInputRef.current.value = "";
+      }
     }
   }, [entryMode]);
 
@@ -229,46 +282,61 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     setSyncingQueue(false);
   };
 
-  const loadEntriesForMember = useCallback(async (memberId: string) => {
-    try {
-      const normalized = await loadFoodEntries(supabase, memberId);
-      setEntries(normalized);
+  const loadEntriesForMember = useCallback(
+    async (memberId: string) => {
+      try {
+        const normalized = await loadFoodEntries(supabase, memberId);
+        setEntries(normalized);
 
-      if (editingEntryId && !normalized.some((entry) => entry.id === editingEntryId)) {
-        setEditingEntryId("");
-        setEditDraft(null);
+        if (
+          editingEntryId &&
+          !normalized.some((entry) => entry.id === editingEntryId)
+        ) {
+          setEditingEntryId("");
+          setEditDraft(null);
+        }
+
+        if (
+          reviewEntryId &&
+          !normalized.some((entry) => entry.id === reviewEntryId)
+        ) {
+          setReviewEntryId("");
+        }
+
+        const names = Array.from(
+          new Set(
+            normalized.map((entry) => entry.item_name.trim()).filter(Boolean),
+          ),
+        );
+        setHistoryItemNames(names);
+
+        const nextAi = await loadAiStatesForEntries(
+          supabase,
+          normalized.map((entry) => entry.id),
+        );
+
+        setAiByEntry(
+          Object.fromEntries(
+            Object.entries(nextAi).map(([entryId, snapshot]) => [
+              entryId,
+              {
+                loading: false,
+                session: snapshot.session,
+                clarifyingQuestions: snapshot.clarifyingQuestions,
+                candidates: snapshot.candidates,
+                followUp: "",
+              } satisfies AiFlowState,
+            ]),
+          ),
+        );
+      } catch (err) {
+        setError(
+          getAppErrorMessage(err, "Unable to load entries for this person."),
+        );
       }
-
-      if (reviewEntryId && !normalized.some((entry) => entry.id === reviewEntryId)) {
-        setReviewEntryId("");
-      }
-
-      const names = Array.from(new Set(normalized.map((entry) => entry.item_name.trim()).filter(Boolean)));
-      setHistoryItemNames(names);
-
-      const nextAi = await loadAiStatesForEntries(
-        supabase,
-        normalized.map((entry) => entry.id),
-      );
-
-      setAiByEntry(
-        Object.fromEntries(
-          Object.entries(nextAi).map(([entryId, snapshot]) => [
-            entryId,
-            {
-              loading: false,
-              session: snapshot.session,
-              clarifyingQuestions: snapshot.clarifyingQuestions,
-              candidates: snapshot.candidates,
-              followUp: "",
-            } satisfies AiFlowState,
-          ]),
-        ),
-      );
-    } catch (err) {
-      setError(getAppErrorMessage(err, "Unable to load entries for this person."));
-    }
-  }, [editingEntryId, reviewEntryId]);
+    },
+    [editingEntryId, reviewEntryId],
+  );
 
   useEffect(() => {
     if (!selectedMemberId) {
@@ -283,7 +351,9 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     void loadEntriesForMember(selectedMemberId);
   }, [loadEntriesForMember, selectedMemberId]);
 
-  const insertManualEntry = async (payload: ManualDraftPayload): Promise<void> => {
+  const insertManualEntry = async (
+    payload: ManualDraftPayload,
+  ): Promise<void> => {
     const entryPayload = {
       member_id: payload.member_id,
       item_name: payload.item_name.trim() || "Manual entry",
@@ -330,18 +400,25 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
         };
       })
       .filter(Boolean) as Array<{
-        entry_id: string;
-        nutrient_code: string;
-        amount: number;
-        unit: string;
-        source: "manual";
-        source_confidence: number;
-      }>;
+      entry_id: string;
+      nutrient_code: string;
+      amount: number;
+      unit: string;
+      source: "manual";
+      source_confidence: number;
+    }>;
 
     if (nutrients.length > 0) {
-      const { error: nutrientError } = await supabase.from("food_entry_nutrients").insert(nutrients);
+      const { error: nutrientError } = await supabase
+        .from("food_entry_nutrients")
+        .insert(nutrients);
       if (nutrientError) {
-        throw new Error(getAppErrorMessage(nutrientError, "Saved entry, but failed to store nutrients."));
+        throw new Error(
+          getAppErrorMessage(
+            nutrientError,
+            "Saved entry, but failed to store nutrients.",
+          ),
+        );
       }
     }
   };
@@ -403,28 +480,18 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     }
   };
 
-  const callAiAnalyze = async (entryId: string, action: "analyze" | "follow_up", messageText: string) => {
-    const result = await supabase.functions.invoke<{
-      session: {
-        id: string;
-        current_round?: number;
-        state: string;
-        overall_confidence: number;
-        clarifying_questions: string[];
-      } | null;
-      candidates: AiCandidate[];
-    }>("food-analyze", {
-      body: {
-        entryId,
-        action,
-        message: messageText,
-      },
+  const callAiAnalyze = async (
+    entryId: string,
+    action: "analyze" | "follow_up",
+    messageText: string,
+  ) => {
+    const result = await invokeFoodAnalyze(session, {
+      entryId,
+      action,
+      message: messageText,
     });
-    if (result.error) {
-      throw new Error(getAppErrorMessage(result.error, "Unable to analyze photo."));
-    }
 
-    const nextSession = result.data?.session;
+    const nextSession = result.session;
     if (!nextSession) {
       return;
     }
@@ -434,29 +501,35 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       [entryId]: {
         ...prev[entryId],
         loading: false,
-      session: {
-        id: nextSession.id,
-        entry_id: entryId,
-        current_round: nextSession.current_round ?? 1,
-        state: (nextSession.state as unknown as AiSession["state"]) ?? "candidate",
-        model: "gpt-5.4-nano",
-        overall_confidence: nextSession.overall_confidence,
+        session: {
+          id: nextSession.id,
+          entry_id: entryId,
+          current_round: nextSession.current_round ?? 1,
+          state:
+            (nextSession.state as unknown as AiSession["state"]) ?? "candidate",
+          model: nextSession.model ?? result.inference_model ?? "gpt-5.4-nano",
+          overall_confidence: nextSession.overall_confidence,
           clarifying_questions: nextSession.clarifying_questions ?? [],
         },
         clarifyingQuestions: nextSession.clarifying_questions ?? [],
-        candidates: result.data?.candidates ?? [],
+        candidates: result.candidates ?? [],
         followUp: "",
       },
     }));
 
-    if (result.data?.candidates) {
+    if (result.candidates) {
       await loadEntriesForMember(selectedMemberId);
     }
   };
 
   const submitPhoto = async (event: FormEvent) => {
     event.preventDefault();
-    if (entryMode !== "photo" || !selectedMemberId || !photoFile || submitting) {
+    if (
+      entryMode !== "photo" ||
+      !selectedMemberId ||
+      !photoFile ||
+      submitting
+    ) {
       return;
     }
 
@@ -482,7 +555,10 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     const path = `${session.user.id}/${selectedMemberId}/${Date.now()}-${cleanedFileName.replace(/[^a-z0-9]/gi, "_").slice(0, 20)}.${extension}`;
     const { error: uploadError } = await supabase.storage
       .from("food-photos")
-      .upload(path, photoFile, { upsert: false, contentType: photoFile.type || "image/jpeg" });
+      .upload(path, photoFile, {
+        upsert: false,
+        contentType: photoFile.type || "image/jpeg",
+      });
     if (uploadError) {
       setError(getAppErrorMessage(uploadError, "Unable to upload photo."));
       setSubmitting(false);
@@ -520,6 +596,9 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     }
 
     setPhotoFile(null);
+    if (photoInputRef.current) {
+      photoInputRef.current.value = "";
+    }
     setSubmitting(false);
     await loadEntriesForMember(selectedMemberId);
   };
@@ -532,7 +611,11 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
 
     setPhotoFile(files[0]);
     if (!form.itemName) {
-      setForm((current) => ({ ...current, itemName: files[0].name.split(".").slice(0, -1).join(".") || "Photo item" }));
+      setForm((current) => ({
+        ...current,
+        itemName:
+          files[0].name.split(".").slice(0, -1).join(".") || "Photo item",
+      }));
     }
   };
 
@@ -546,12 +629,16 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
       return;
     }
 
-    setMessage("Candidate applied. You can still edit values before finalizing.");
+    setMessage(
+      "Candidate applied. You can still edit values before finalizing.",
+    );
     await loadEntriesForMember(selectedMemberId);
   };
 
   const finalizeEntry = async (entryId: string) => {
-    const { error } = await supabase.rpc("finalize_food_entry", { p_entry_id: entryId });
+    const { error } = await supabase.rpc("finalize_food_entry", {
+      p_entry_id: entryId,
+    });
     if (error) {
       setError(getAppErrorMessage(error, "Unable to finalize entry."));
       return;
@@ -596,7 +683,10 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
     setEditSubmitting(true);
 
     try {
-      const nutrients = buildEditedNutrientPayload(editDraft.nutrients, nutrientMap);
+      const nutrients = buildEditedNutrientPayload(
+        editDraft.nutrients,
+        nutrientMap,
+      );
 
       const { error } = await supabase.rpc("update_food_entry_with_values", {
         p_entry_id: editDraft.entryId,
@@ -652,10 +742,16 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
   const resetForm = () => {
     setForm(initialFormState());
     setNutrientValues((prev) => buildEmptyValueMap(Object.keys(prev)));
+    setPhotoFile(null);
+    if (photoInputRef.current) {
+      photoInputRef.current.value = "";
+    }
   };
 
   const activeAi = reviewEntryId ? aiByEntry[reviewEntryId] : null;
-  const activeEntry = reviewEntryId ? entries.find((entry) => entry.id === reviewEntryId) ?? null : null;
+  const activeEntry = reviewEntryId
+    ? (entries.find((entry) => entry.id === reviewEntryId) ?? null)
+    : null;
 
   if (loading) {
     return <p className="page-status">Loading food tracker...</p>;
@@ -673,7 +769,12 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
         </div>
       </header>
 
-      <OfflineBanner queued={queued} isOnline={online} onRetry={() => void syncQueued()} syncing={syncingQueue} />
+      <OfflineBanner
+        queued={queued}
+        isOnline={online}
+        onRetry={() => void syncQueued()}
+        syncing={syncingQueue}
+      />
 
       <section className="panel">
         <div className="member-select-row">
@@ -690,7 +791,9 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
               </option>
             ))}
           </select>
-          {isAdmin ? <button onClick={() => void syncQueued()}>Sync queue</button> : null}
+          {isAdmin ? (
+            <button onClick={() => void syncQueued()}>Sync queue</button>
+          ) : null}
         </div>
 
         <TrendChart
@@ -703,7 +806,9 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
           <select
             id="metric"
             value={selectedMetric}
-            onChange={(event) => setSelectedMetric(event.target.value as NutrientCode)}
+            onChange={(event) =>
+              setSelectedMetric(event.target.value as NutrientCode)
+            }
           >
             {AVAILABLE_METRICS.map((metric) => (
               <option key={metric} value={metric}>
@@ -733,13 +838,21 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
           </button>
         </div>
 
-        <form className="entry-form" onSubmit={entryMode === "manual" ? saveManual : submitPhoto}>
+        <form
+          className="entry-form"
+          onSubmit={entryMode === "manual" ? saveManual : submitPhoto}
+        >
           <div className="field-row">
             <label>Item name</label>
             <input
               list="history-items"
               value={form.itemName}
-              onChange={(event) => setForm((previous) => ({ ...previous, itemName: event.target.value }))}
+              onChange={(event) =>
+                setForm((previous) => ({
+                  ...previous,
+                  itemName: event.target.value,
+                }))
+              }
               placeholder="Apple, toast, chicken breast..."
             />
             <datalist id="history-items">
@@ -756,14 +869,24 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
                 type="datetime-local"
                 step={60}
                 value={form.consumedAt}
-                onChange={(event) => setForm((previous) => ({ ...previous, consumedAt: event.target.value }))}
+                onChange={(event) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    consumedAt: event.target.value,
+                  }))
+                }
               />
             </label>
             <label>
               Meal
               <select
                 value={form.mealType}
-                onChange={(event) => setForm((previous) => ({ ...previous, mealType: event.target.value as MealTime }))}
+                onChange={(event) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    mealType: event.target.value as MealTime,
+                  }))
+                }
               >
                 <option value="breakfast">Breakfast</option>
                 <option value="lunch">Lunch</option>
@@ -779,36 +902,65 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
                 step="0.1"
                 min="0.1"
                 value={form.servingQty}
-                onChange={(event) => setForm((previous) => ({ ...previous, servingQty: event.target.value }))}
+                onChange={(event) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    servingQty: event.target.value,
+                  }))
+                }
               />
             </label>
             <label>
               Serving unit
               <input
                 value={form.servingUnit}
-                onChange={(event) => setForm((previous) => ({ ...previous, servingUnit: event.target.value }))}
+                onChange={(event) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    servingUnit: event.target.value,
+                  }))
+                }
                 placeholder="oz"
               />
             </label>
           </div>
 
           {entryMode === "photo" ? (
-            <label className="photo-control">
-              Photo
+            <div className="photo-control">
               <input
+                ref={photoInputRef}
+                className="visually-hidden"
+                data-testid="photo-input"
                 type="file"
                 accept="image/*"
-                capture="environment"
+                capture={photoInputBehavior.capture}
                 onChange={handlePhotoInput}
               />
-            </label>
+              <div className="photo-picker-row">
+                <button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                >
+                  Add photo
+                </button>
+                <span className="photo-file-name">
+                  {photoFile ? photoFile.name : "No photo selected yet."}
+                </span>
+              </div>
+              <p className="photo-help">{photoInputBehavior.helperText}</p>
+            </div>
           ) : null}
 
           <label>
             Notes
             <textarea
               value={form.manualNotes}
-              onChange={(event) => setForm((previous) => ({ ...previous, manualNotes: event.target.value }))}
+              onChange={(event) =>
+                setForm((previous) => ({
+                  ...previous,
+                  manualNotes: event.target.value,
+                }))
+              }
             />
           </label>
 
@@ -840,8 +992,15 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
           {error ? <p className="error">{error}</p> : null}
           {message ? <p className="success">{message}</p> : null}
           <div className="button-row">
-            <button type="submit" disabled={submitting || (entryMode === "photo" && !photoFile)}>
-              {submitting ? "Saving..." : entryMode === "manual" ? "Save entry" : "Upload + analyze"}
+            <button
+              type="submit"
+              disabled={submitting || (entryMode === "photo" && !photoFile)}
+            >
+              {submitting
+                ? "Saving..."
+                : entryMode === "manual"
+                  ? "Save entry"
+                  : "Upload + analyze"}
             </button>
             <button type="button" onClick={resetForm}>
               Reset
@@ -878,7 +1037,11 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
                   </td>
                   <td>{getNutrientAmount(entry, "calories").toFixed(1)}</td>
                   <td>{getNutrientAmount(entry, "protein_g").toFixed(1)}</td>
-                  <td>{entry.source_confidence !== null ? `${Math.round(entry.source_confidence * 100)}%` : "—"}</td>
+                  <td>
+                    {entry.source_confidence !== null
+                      ? `${Math.round(entry.source_confidence * 100)}%`
+                      : "—"}
+                  </td>
                   <td>{entry.workflow_state}</td>
                   <td>
                     <button type="button" onClick={() => openReview(entry.id)}>
@@ -904,7 +1067,11 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
               <input
                 value={editDraft.itemName}
                 onChange={(event) =>
-                  setEditDraft((current) => (current ? { ...current, itemName: event.target.value } : null))
+                  setEditDraft((current) =>
+                    current
+                      ? { ...current, itemName: event.target.value }
+                      : null,
+                  )
                 }
               />
             </div>
@@ -916,7 +1083,11 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
                   step={60}
                   value={editDraft.consumedAt}
                   onChange={(event) =>
-                    setEditDraft((current) => (current ? { ...current, consumedAt: event.target.value } : null))
+                    setEditDraft((current) =>
+                      current
+                        ? { ...current, consumedAt: event.target.value }
+                        : null,
+                    )
                   }
                 />
               </label>
@@ -926,7 +1097,12 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
                   value={editDraft.mealType}
                   onChange={(event) =>
                     setEditDraft((current) =>
-                      current ? { ...current, mealType: event.target.value as MealTime } : current
+                      current
+                        ? {
+                            ...current,
+                            mealType: event.target.value as MealTime,
+                          }
+                        : current,
                     )
                   }
                 >
@@ -945,7 +1121,11 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
                   min="0.1"
                   value={editDraft.servingQty}
                   onChange={(event) =>
-                    setEditDraft((current) => (current ? { ...current, servingQty: event.target.value } : null))
+                    setEditDraft((current) =>
+                      current
+                        ? { ...current, servingQty: event.target.value }
+                        : null,
+                    )
                   }
                 />
               </label>
@@ -955,7 +1135,9 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
                   value={editDraft.servingUnit}
                   onChange={(event) =>
                     setEditDraft((current) =>
-                      current ? { ...current, servingUnit: event.target.value } : null
+                      current
+                        ? { ...current, servingUnit: event.target.value }
+                        : null,
                     )
                   }
                 />
@@ -966,7 +1148,11 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
               <textarea
                 value={editDraft.manualNotes}
                 onChange={(event) =>
-                  setEditDraft((current) => (current ? { ...current, manualNotes: event.target.value } : null))
+                  setEditDraft((current) =>
+                    current
+                      ? { ...current, manualNotes: event.target.value }
+                      : null,
+                  )
                 }
               />
             </label>
@@ -989,7 +1175,10 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
                           }
                           return {
                             ...current,
-                            nutrients: { ...current.nutrients, [nutrient.code]: event.target.value },
+                            nutrients: {
+                              ...current.nutrients,
+                              [nutrient.code]: event.target.value,
+                            },
                           };
                         })
                       }
@@ -1015,24 +1204,44 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
         <section className="panel">
           <h2>Review AI candidate for {activeEntry.item_name}</h2>
           <p>
-            {activeAi?.loading ? "Running AI analysis..." : "Adjust candidate choice and continue."}
+            {activeAi?.loading
+              ? "Running AI analysis..."
+              : "Adjust candidate choice and continue."}
           </p>
           {activeAi?.session ? (
             <>
-              <p>Overall confidence: {Math.round((activeAi.session.overall_confidence ?? 0) * 100)}%</p>
+              <p>
+                Overall confidence:{" "}
+                {Math.round((activeAi.session.overall_confidence ?? 0) * 100)}%
+              </p>
               <ol className="candidate-list">
                 {activeAi.candidates.map((candidate) => (
-                  <li key={candidate.id} className={candidate.is_selected ? "candidate-selected" : ""}>
-                    <strong>{candidate.item_name}</strong> — {candidate.serving_qty} {candidate.serving_unit}
-                    <p>Confidence: {(candidate.confidence * 100).toFixed(0)}%</p>
+                  <li
+                    key={candidate.id}
+                    className={
+                      candidate.is_selected ? "candidate-selected" : ""
+                    }
+                  >
+                    <strong>{candidate.item_name}</strong> —{" "}
+                    {candidate.serving_qty} {candidate.serving_unit}
+                    <p>
+                      Confidence: {(candidate.confidence * 100).toFixed(0)}%
+                    </p>
                     <p>{candidate.rationale || "No rationale provided."}</p>
-                    <button type="button" onClick={() => void applyCandidate(activeEntry.id, candidate.id)}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void applyCandidate(activeEntry.id, candidate.id)
+                      }
+                    >
                       Apply this candidate
                     </button>
                   </li>
                 ))}
               </ol>
-              {activeAi.candidates.length === 0 ? <p className="empty-state">No candidates yet.</p> : null}
+              {activeAi.candidates.length === 0 ? (
+                <p className="empty-state">No candidates yet.</p>
+              ) : null}
             </>
           ) : (
             <p className="empty-state">No AI session for this entry.</p>
@@ -1056,13 +1265,20 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
               onChange={(event) =>
                 setAiByEntry((prev) => ({
                   ...prev,
-                  [activeEntry.id]: { ...(prev[activeEntry.id] ?? ({} as AiFlowState)), followUp: event.target.value },
+                  [activeEntry.id]: {
+                    ...(prev[activeEntry.id] ?? ({} as AiFlowState)),
+                    followUp: event.target.value,
+                  },
                 }))
               }
             />
           </label>
           <div className="button-row">
-            <button type="button" onClick={() => void sendFollowUp(activeEntry.id)} disabled={activeAi?.loading}>
+            <button
+              type="button"
+              onClick={() => void sendFollowUp(activeEntry.id)}
+              disabled={activeAi?.loading}
+            >
               {activeAi?.loading ? "Working..." : "Send follow-up"}
             </button>
             <button
@@ -1079,7 +1295,9 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
         </section>
       ) : null}
 
-      {isAdmin ? <AdminPanel members={members} onMembersChanged={loadMembers} /> : null}
+      {isAdmin ? (
+        <AdminPanel members={members} onMembersChanged={loadMembers} />
+      ) : null}
     </main>
   );
 };

@@ -1,3 +1,8 @@
 name = "food-tracker"
 compatibility_date = "2026-03-22"
+compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "dist"
+
+[vars]
+SUPABASE_URL = "https://gkfqwrfunkrpxynslwfn.supabase.co"
+OPENAI_MODEL = "gpt-5.4-nano"

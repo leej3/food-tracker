@@ -102,7 +102,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_KEY }}
         run: |
-          wrangler pages deploy ./${{ env.BUILD_DIR }} \
+          wrangler pages deploy \
             --project-name ${{ env.PROJECT_NAME }} \
             --branch main \
             --commit-dirty=true
