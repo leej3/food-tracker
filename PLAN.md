@@ -239,7 +239,7 @@ The first release intentionally favors simplicity and a single deployed app:
 
 - Verify the production `food-tracker` photo-analysis flow end to end against the live hosted stack.
 - Make the mobile experience camera-first on iPhone while still supporting photo upload from library/files.
-- Ensure hosted AI analysis uses `OPENAI_API_KEY` only inside the deployed server-side function environment, never in the browser bundle.
+- Ensure hosted AI analysis uses `OPENAI_API_KEY` only inside a deployed Cloudflare server-side function environment, never in the browser bundle.
 
 ### Product requirements
 
@@ -248,29 +248,31 @@ The first release intentionally favors simplicity and a single deployed app:
 - Secondary action can be "Upload existing photo" for library/file selection.
 - Desktop should continue to support file upload without regression.
 - The same capture flow should feed the existing Supabase Storage + analysis pipeline.
-- Production analysis must authenticate to OpenAI using `OPENAI_API_KEY` in the deployed Supabase Edge Function environment.
+- Production analysis must authenticate to OpenAI using `OPENAI_API_KEY` in the deployed Cloudflare function environment.
 - The browser must never receive `OPENAI_API_KEY`; it should only call the hosted analysis function with the authenticated user session.
+- Photo entry should use one `Add photo` action that prefers direct camera capture on supported phones and falls back to normal file selection elsewhere.
 
 ### Clarifications needed before implementation
 
-- Confirm the server-side boundary for OpenAI:
-  - recommended: keep OpenAI calls inside Supabase Edge Functions and store `OPENAI_API_KEY` only in Supabase hosted secrets.
-- Confirm the capture UX:
-  - two explicit actions (`Take photo`, `Upload photo`), or
-  - one unified `Add photo` action that prefers camera on supported phones.
+- Decision: move OpenAI calls to a Cloudflare server-side boundary and keep `OPENAI_API_KEY` only in Cloudflare secrets/runtime bindings.
+- Decision: use one unified `Add photo` action that prefers camera on supported phones.
 
 ### Implementation plan
 
-- Split the current single photo input into two explicit actions:
-  - camera capture input using `accept="image/*"` and `capture="environment"`
-  - library/file upload input using `accept="image/*"` without `capture`
-- Keep both inputs behind shared upload + analysis handlers so the storage/inference path remains identical after file selection.
+- Replace the current photo control with one `Add photo` action backed by capability-aware input behavior:
+  - mobile-preferred path uses `accept="image/*"` and `capture="environment"`
+  - desktop / unsupported path falls back to standard file selection
+- Keep camera capture and library/file selection behind shared upload + analysis handlers so the storage/inference path remains identical after file selection.
 - Add capability-aware UI copy:
-  - mobile-first label for camera path
-  - neutral upload fallback for desktop and unsupported browsers
+-  - single `Add photo` call to action
+-  - helper copy that makes camera preference clear on mobile without splitting the workflow into separate buttons
 - Preserve resumable AI session behavior after either capture source.
-- Review edge-function deployment configuration and ensure `OPENAI_API_KEY` is present in hosted secrets for the `food-analyze` function.
-- Remove ambiguity in docs so production secret setup explicitly references `OPENAI_API_KEY`.
+- Replace Supabase-hosted OpenAI analysis calls with a Cloudflare server-side endpoint that:
+  - receives the authenticated browser request
+  - calls OpenAI using `OPENAI_API_KEY`
+  - returns candidate and follow-up payloads compatible with the existing app flow
+- Keep Supabase focused on auth/storage/data for now so future migration off Supabase stays bounded.
+- Update deployment/docs so production secret setup explicitly references Cloudflare-side `OPENAI_API_KEY`.
 
 ### Verification plan
 
@@ -285,13 +287,13 @@ The first release intentionally favors simplicity and a single deployed app:
   - confirm no regression in manual entry flow
 - Production console/network verification:
   - no blocked mixed-content or invalid-key errors
-  - hosted function call succeeds
+  - Cloudflare analysis endpoint call succeeds
   - storage upload succeeds
 - Secrets verification:
-  - Supabase hosted function environment includes `OPENAI_API_KEY`
+  - Cloudflare deployed environment includes `OPENAI_API_KEY`
 
 ### Deliverables
 
 - camera-first production UX in the app
-- OpenAI calls kept server-side with `OPENAI_API_KEY` only in hosted function secrets
+- OpenAI calls kept server-side in Cloudflare with `OPENAI_API_KEY` only in Cloudflare secrets
 - recorded smoke-test results in this plan document after completion
