@@ -239,7 +239,7 @@ The first release intentionally favors simplicity and a single deployed app:
 
 - Verify the production `food-tracker` photo-analysis flow end to end against the live hosted stack.
 - Make the mobile experience camera-first on iPhone while still supporting photo upload from library/files.
-- Ensure hosted AI analysis uses `OPENAI_API_KEY` in deployment, not a local-only secret path.
+- Ensure hosted AI analysis uses `OPENAI_API_KEY` only inside the deployed server-side function environment, never in the browser bundle.
 
 ### Product requirements
 
@@ -249,6 +249,15 @@ The first release intentionally favors simplicity and a single deployed app:
 - Desktop should continue to support file upload without regression.
 - The same capture flow should feed the existing Supabase Storage + analysis pipeline.
 - Production analysis must authenticate to OpenAI using `OPENAI_API_KEY` in the deployed Supabase Edge Function environment.
+- The browser must never receive `OPENAI_API_KEY`; it should only call the hosted analysis function with the authenticated user session.
+
+### Clarifications needed before implementation
+
+- Confirm the server-side boundary for OpenAI:
+  - recommended: keep OpenAI calls inside Supabase Edge Functions and store `OPENAI_API_KEY` only in Supabase hosted secrets.
+- Confirm the capture UX:
+  - two explicit actions (`Take photo`, `Upload photo`), or
+  - one unified `Add photo` action that prefers camera on supported phones.
 
 ### Implementation plan
 
@@ -280,10 +289,9 @@ The first release intentionally favors simplicity and a single deployed app:
   - storage upload succeeds
 - Secrets verification:
   - Supabase hosted function environment includes `OPENAI_API_KEY`
-  - no dependency remains on disabled legacy Supabase JWT keys
 
 ### Deliverables
 
 - camera-first production UX in the app
-- updated deployment/docs for `OPENAI_API_KEY`
+- OpenAI calls kept server-side with `OPENAI_API_KEY` only in hosted function secrets
 - recorded smoke-test results in this plan document after completion
