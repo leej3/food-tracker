@@ -230,3 +230,4 @@ The first release intentionally favors simplicity and a single deployed app:
 - 2026-03-22: Rewrote Playwright regression coverage to include manual entry, schema-missing bootstrap messaging, and photo analyze/apply/follow-up/finalize.
 - 2026-03-22: Local `npm run ci` passes end-to-end.
 - 2026-03-23: Switched runtime and CI configuration to prefer `VITE_SUPABASE_PUBLISHABLE_KEY` with legacy env fallback during rotation.
+- 2026-03-23: Hardened schema bootstrap to retry public probe checks and emit actionable failure output when `SUPABASE_DB_URL` is not configured.
