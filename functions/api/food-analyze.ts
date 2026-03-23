@@ -56,6 +56,12 @@ interface PagesFunctionContext {
   waitUntil: (promise: Promise<unknown>) => void;
 }
 
+const VERIFIED_OPENAI_MODELS = [
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
+] as const;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -87,6 +93,24 @@ const normalizeModelName = (value: unknown) => {
   }
 
   return value.trim().slice(0, 120);
+};
+
+const normalizeVerifiedOpenAIModel = (value: unknown) => {
+  const normalized = normalizeModelName(value);
+  return VERIFIED_OPENAI_MODELS.includes(
+    normalized as (typeof VERIFIED_OPENAI_MODELS)[number],
+  )
+    ? normalized
+    : "";
+};
+
+const getOpenAIErrorDetail = (error: unknown) => {
+  const message = error instanceof Error ? error.message : "analysis_failed";
+  if (/model/i.test(message)) {
+    return "Selected OpenAI model is not currently available. Choose another verified GPT-5.4 model and retry.";
+  }
+
+  return "Photo analysis failed while contacting OpenAI. Retry in a moment.";
 };
 
 const parseModelResponse = (content: string): ModelResponse => {
@@ -545,11 +569,22 @@ export const onRequest = async ({
   }
 
   const openAiKey = env.OPENAI_API_KEY;
-  const requestedModel = normalizeModelName(body.model);
+  const requestedModel = normalizeVerifiedOpenAIModel(body.model);
+  if (action === "analyze" && body.model && !requestedModel) {
+    return jsonResponse(
+      {
+        error: "invalid_model",
+        detail:
+          "Choose one of the verified OpenAI models: gpt-5.4, gpt-5.4-mini, or gpt-5.4-nano.",
+      },
+      400,
+    );
+  }
+
   const defaultModel =
-    existingSession?.model ||
+    normalizeVerifiedOpenAIModel(existingSession?.model) ||
     requestedModel ||
-    env.OPENAI_MODEL ||
+    normalizeVerifiedOpenAIModel(env.OPENAI_MODEL) ||
     DEFAULT_OPENAI_MODEL;
   const currentRound =
     action === "analyze" ? 1 : (existingSession?.current_round ?? 0) + 1;
@@ -569,16 +604,27 @@ export const onRequest = async ({
     return jsonResponse({ error: "missing_openai_key" }, 500);
   }
 
-  const inference = await callOpenAIInference({
-    action,
-    imageUrl: signedUrl,
-    message: actionMessage,
-    model: defaultModel,
-    openAiKey,
-    previousMessages: messageHistory,
-    round: currentRound,
-    timeoutMs: parseEnvFloat(env.OPENAI_REQUEST_TIMEOUT_MS, 8000),
-  });
+  let inference: InferenceResult;
+  try {
+    inference = await callOpenAIInference({
+      action,
+      imageUrl: signedUrl,
+      message: actionMessage,
+      model: defaultModel,
+      openAiKey,
+      previousMessages: messageHistory,
+      round: currentRound,
+      timeoutMs: parseEnvFloat(env.OPENAI_REQUEST_TIMEOUT_MS, 8000),
+    });
+  } catch (error) {
+    return jsonResponse(
+      {
+        error: "analysis_failed",
+        detail: getOpenAIErrorDetail(error),
+      },
+      502,
+    );
+  }
 
   let sessionId = existingSession?.id ?? null;
 

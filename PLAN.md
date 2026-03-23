@@ -237,7 +237,7 @@ The first release intentionally favors simplicity and a single deployed app:
 - 2026-03-23: Replaced browser-side `supabase.functions.invoke("food-analyze")` with a same-origin `/api/food-analyze` client path and added a Vite dev proxy fallback for local Supabase function use.
 - 2026-03-23: Added Cloudflare Pages Function `functions/api/food-analyze.ts` so `OPENAI_API_KEY` stays server-side in Cloudflare runtime secrets/bindings.
 - 2026-03-23: Reworked photo entry to a single camera-first `Add photo` action with mobile-aware helper copy and desktop file-picker fallback.
-- 2026-03-23: Added a per-analysis OpenAI model override in the UI (default `gpt-5.4-nano`) and removed the shadow inference rollout path for this release.
+- 2026-03-23: Replaced the freeform model input with a verified GPT-5.4 dropdown (`gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`), kept `gpt-5.4-nano` as the default, and removed the shadow inference rollout path for this release.
 - 2026-03-23: Verified local quality gates:
   - `npm run lint`
   - `npm run typecheck`

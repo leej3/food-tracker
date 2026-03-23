@@ -32,6 +32,8 @@ import {
 } from "../lib/backend";
 import {
   DEFAULT_OPENAI_MODEL,
+  VERIFIED_OPENAI_MODELS,
+  type VerifiedOpenAIModel,
   invokeFoodAnalyze,
 } from "../lib/food-analyze";
 import {
@@ -163,7 +165,7 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
   const [entryMode, setEntryMode] = useState<EntryMode>("manual");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoAnalyzeModel, setPhotoAnalyzeModel] =
-    useState(DEFAULT_OPENAI_MODEL);
+    useState<VerifiedOpenAIModel>(DEFAULT_OPENAI_MODEL);
   const [form, setForm] = useState<ManualFormState>(initialFormState);
   const [nutrientValues, setNutrientValues] = useState<Record<string, string>>(
     {},
@@ -962,14 +964,20 @@ export const FoodTrackerPage = ({ session }: { session: Session }) => {
               </div>
               <label>
                 OpenAI model
-                <input
+                <select
                   value={photoAnalyzeModel}
-                  onChange={(event) => setPhotoAnalyzeModel(event.target.value)}
-                  placeholder={DEFAULT_OPENAI_MODEL}
-                  spellCheck={false}
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                />
+                  onChange={(event) =>
+                    setPhotoAnalyzeModel(
+                      event.target.value as VerifiedOpenAIModel,
+                    )
+                  }
+                >
+                  {VERIFIED_OPENAI_MODELS.map((modelOption) => (
+                    <option key={modelOption.id} value={modelOption.id}>
+                      {modelOption.label}
+                    </option>
+                  ))}
+                </select>
               </label>
               <p className="photo-help">{photoInputBehavior.helperText}</p>
             </div>

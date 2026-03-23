@@ -153,7 +153,7 @@ Coverage includes:
   - `VITE_SUPABASE_PUBLISHABLE_KEY`
 - Cloudflare Pages Function runtime:
   - `OPENAI_API_KEY` (secret)
-  - `OPENAI_MODEL` (default `gpt-5.4-nano`, overridable per analysis in the UI)
+  - `OPENAI_MODEL` (default `gpt-5.4-nano`, overridable per analysis in the UI dropdown)
   - `SUPABASE_URL`
   - optional `OPENAI_REQUEST_TIMEOUT_MS`
 

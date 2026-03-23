@@ -576,7 +576,7 @@ test("photo review flow supports analyze, apply, follow-up, and finalize", async
   await page
     .getByPlaceholder("Apple, toast, chicken breast...")
     .fill("Lunch photo");
-  await page.getByLabel("OpenAI model").fill("gpt-5.4-mini");
+  await page.getByLabel("OpenAI model").selectOption("gpt-5.4-mini");
   await page.locator('input[data-testid="photo-input"]').setInputFiles({
     name: "meal.jpg",
     mimeType: "image/jpeg",

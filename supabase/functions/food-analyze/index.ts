@@ -48,6 +48,11 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+const VERIFIED_OPENAI_MODELS = [
+  "gpt-5.4",
+  "gpt-5.4-mini",
+  "gpt-5.4-nano",
+] as const;
 const DEFAULT_OPENAI_MODEL = "gpt-5.4-nano";
 const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -76,6 +81,22 @@ const normalizeModelName = (value: unknown) => {
   }
 
   return value.trim().slice(0, 120);
+};
+
+const normalizeVerifiedOpenAIModel = (value: unknown) => {
+  const normalized = normalizeModelName(value);
+  return VERIFIED_OPENAI_MODELS.includes(normalized as (typeof VERIFIED_OPENAI_MODELS)[number])
+    ? normalized
+    : "";
+};
+
+const getOpenAIErrorDetail = (error: unknown) => {
+  const message = error instanceof Error ? error.message : "analysis_failed";
+  if (/model/i.test(message)) {
+    return "Selected OpenAI model is not currently available. Choose another verified GPT-5.4 model and retry.";
+  }
+
+  return "Photo analysis failed while contacting OpenAI. Retry in a moment.";
 };
 
 const parseModelResponse = (content: string): ModelResponse => {
@@ -470,11 +491,18 @@ Deno.serve(async (req: Request) => {
     signedUrlObj = signedUrlData;
   }
 
-  const requestedModel = normalizeModelName(body.model);
+  const requestedModel = normalizeVerifiedOpenAIModel(body.model);
+  if (action === "analyze" && body.model && !requestedModel) {
+    return jsonResponse({
+      error: "invalid_model",
+      detail:
+        "Choose one of the verified OpenAI models: gpt-5.4, gpt-5.4-mini, or gpt-5.4-nano.",
+    }, 400);
+  }
   const defaultModel =
-    existingSession?.model ||
+    normalizeVerifiedOpenAIModel(existingSession?.model) ||
     requestedModel ||
-    Deno.env.get("OPENAI_MODEL") ||
+    normalizeVerifiedOpenAIModel(Deno.env.get("OPENAI_MODEL")) ||
     DEFAULT_OPENAI_MODEL;
   const currentRound = action === "analyze" ? 1 : (existingSession?.current_round ?? 0) + 1;
 
@@ -493,15 +521,23 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ error: "missing_openai_key" }, 500);
   }
 
-  const inference = await callOpenAIInference({
-    imageUrl: signedUrlObj!.signedUrl,
-    previousMessages: messageHistory,
-    action,
-    message: actionMessage,
-    round: currentRound,
-    model: defaultModel,
-    openAiKey,
-  });
+  let inference: InferenceResult;
+  try {
+    inference = await callOpenAIInference({
+      imageUrl: signedUrlObj!.signedUrl,
+      previousMessages: messageHistory,
+      action,
+      message: actionMessage,
+      round: currentRound,
+      model: defaultModel,
+      openAiKey,
+    });
+  } catch (error) {
+    return jsonResponse({
+      error: "analysis_failed",
+      detail: getOpenAIErrorDetail(error),
+    }, 502);
+  }
 
   let sessionId = existingSession?.id;
 

@@ -29,7 +29,22 @@ export interface FoodAnalyzeResponse {
 }
 
 const FOOD_ANALYZE_PATH = "/api/food-analyze";
-export const DEFAULT_OPENAI_MODEL = "gpt-5.4-nano";
+export const VERIFIED_OPENAI_MODELS = [
+  {
+    id: "gpt-5.4-nano",
+    label: "GPT-5.4 nano",
+  },
+  {
+    id: "gpt-5.4-mini",
+    label: "GPT-5.4 mini",
+  },
+  {
+    id: "gpt-5.4",
+    label: "GPT-5.4",
+  },
+] as const;
+export type VerifiedOpenAIModel = (typeof VERIFIED_OPENAI_MODELS)[number]["id"];
+export const DEFAULT_OPENAI_MODEL: VerifiedOpenAIModel = "gpt-5.4-nano";
 const supabasePublishableKey =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
   import.meta.env.VITE_SUPABASE_ANON_KEY;
